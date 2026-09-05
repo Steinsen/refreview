@@ -10,21 +10,21 @@
     {
       "binding": "DB",
       "database_name": "refreview",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "6e2d57ef-cad5-4ba9-8df0-6fb8b456e3ca",
       "migrations_dir": "migrations"
     }
   ],
   "vars": {
     // Kommaseparerade e-postadresser som alltid är admin och godkända
-    "ADMIN_EMAILS": "din.adress@gmail.com",
+    "ADMIN_EMAILS": "ragnar@steinsen.com",
     // Publik adress till appen, utan avslutande snedstreck
-    "APP_URL": "https://refreview.DITT-KONTO.workers.dev",
+    "APP_URL": "https://refreview.steinsen.workers.dev",
     // Namn som visas i appen och i inloggningsmejlen
     "APP_NAME": "RefReview",
     // Avsändare för inloggningskoder – domänen måste vara verifierad hos Resend
     "MAIL_FROM": "RefReview <inloggning@steinsen.com>",
     // Cloudflare-konto-ID (Dashboard → Workers & Pages, högerkolumnen)
-    "CF_ACCOUNT_ID": "ERSATT",
+    "CF_ACCOUNT_ID": "d3d8c9be3916539b2d7719a96ed8eeb8",
     // Max längd per klipp i sekunder
     "STREAM_MAX_SECONDS": "1800"
   }
