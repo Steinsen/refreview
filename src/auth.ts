@@ -10,6 +10,7 @@ export type Env = {
   MAIL_FROM: string
   SESSION_SECRET: string
   RESEND_API_KEY: string
+  REGISTRATION_CODE: string
   CF_ACCOUNT_ID: string
   CF_STREAM_API_TOKEN: string
   STREAM_MAX_SECONDS: string
@@ -21,6 +22,7 @@ export type User = {
   name: string
   approved: number
   is_admin: number
+  password_hash?: string | null
 }
 
 export type Vars = { user: User | null }
@@ -30,6 +32,7 @@ const SESSION_COOKIE = 'dv_session'
 const SESSION_DAYS = 30
 const CODE_TTL_MIN = 10
 const CODE_MAX_ATTEMPTS = 5
+export const MIN_PASSWORD = 8
 
 export function isAdminEmail(env: Env, email: string) {
   return env.ADMIN_EMAILS.split(',')
@@ -44,6 +47,11 @@ export function normalizeEmail(s: string) {
 
 export function isValidEmail(s: string) {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)
+}
+
+/** Registreringskoden från miljön. Tom sträng = registrering bara för adresser i ADMIN_EMAILS och inbjudna. */
+export function registrationCode(env: Env) {
+  return (env.REGISTRATION_CODE ?? '').trim()
 }
 
 /** Läser sessionscookien och sätter c.var.user (eller null). */
@@ -89,7 +97,120 @@ export const requireAdmin: MiddlewareHandler<App> = async (c, next) => {
   await next()
 }
 
-// ---------- Engångskod ----------
+// ---------- Session ----------
+
+async function startSession(c: Context<App>, userId: number) {
+  const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400
+  const token = await sign({ uid: userId, exp }, c.env.SESSION_SECRET)
+  setCookie(c, SESSION_COOKIE, token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: SESSION_DAYS * 86400 })
+}
+
+export function logout(c: Context<App>) {
+  deleteCookie(c, SESSION_COOKIE, { path: '/' })
+  return c.redirect('/login?info=utloggad')
+}
+
+// ---------- Lösenord ----------
+
+const PBKDF2_ITERATIONS = 100_000
+
+function toBase64(bytes: Uint8Array) {
+  return btoa(String.fromCharCode(...bytes))
+}
+
+function fromBase64(s: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0))
+}
+
+async function derive(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256)
+  return new Uint8Array(bits)
+}
+
+/** Format: pbkdf2$<iterationer>$<salt i base64>$<hash i base64> */
+export async function hashPassword(password: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const hash = await derive(password, salt, PBKDF2_ITERATIONS)
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${toBase64(salt)}$${toBase64(hash)}`
+}
+
+/** Jämför utan att läcka hur många tecken som stämde. */
+function equalStrings(a: string, b: string) {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+export async function verifyPassword(password: string, stored: string) {
+  const [scheme, iterations, salt, hash] = stored.split('$')
+  if (scheme !== 'pbkdf2' || !iterations || !salt || !hash) return false
+  const got = await derive(password, fromBase64(salt), Number(iterations))
+  return equalStrings(toBase64(got), hash)
+}
+
+// ---------- Registrering ----------
+
+export type RegisterResult = 'ok' | 'finns_redan' | 'fel_kod' | 'stangd' | 'avstangd'
+
+/**
+ * Skapar ett konto med lösenord. Rätt registreringskod krävs, utom för
+ * adresser i ADMIN_EMAILS och för dem som admin redan lagt till i listan.
+ */
+export async function register(
+  c: Context<App>,
+  input: { name: string; email: string; password: string; code: string },
+): Promise<RegisterResult> {
+  const { name, email, password, code } = input
+  const existing = await c.env.DB.prepare('SELECT id, approved, password_hash FROM users WHERE email = ?')
+    .bind(email)
+    .first<{ id: number; approved: number; password_hash: string | null }>()
+  if (existing?.password_hash) return 'finns_redan'
+
+  const admin = isAdminEmail(c.env, email)
+  const invited = !!existing && existing.approved === 1
+  if (!admin) {
+    if (existing && !existing.approved) return 'avstangd'
+    if (!invited) {
+      const expected = registrationCode(c.env)
+      if (!expected) return 'stangd'
+      if (!equalStrings(code.trim().toLowerCase(), expected.toLowerCase())) return 'fel_kod'
+    }
+  }
+
+  const hash = await hashPassword(password)
+  await c.env.DB.prepare(
+    `INSERT INTO users (email, name, approved, is_admin, password_hash) VALUES (?, ?, 1, ?, ?)
+     ON CONFLICT(email) DO UPDATE SET name = excluded.name, password_hash = excluded.password_hash,
+       approved = 1, is_admin = MAX(users.is_admin, excluded.is_admin)`,
+  )
+    .bind(email, name, admin ? 1 : 0, hash)
+    .run()
+
+  const user = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>()
+  if (!user) return 'stangd'
+  await startSession(c, user.id)
+  return 'ok'
+}
+
+// ---------- Inloggning med lösenord ----------
+
+export type LoginResult = 'ok' | 'fel' | 'inget_losenord' | 'avstangd'
+
+export async function loginWithPassword(c: Context<App>, email: string, password: string): Promise<LoginResult> {
+  const user = await c.env.DB.prepare('SELECT id, approved, password_hash FROM users WHERE email = ?')
+    .bind(email)
+    .first<{ id: number; approved: number; password_hash: string | null }>()
+  if (!user) return 'fel'
+  if (!user.password_hash) return 'inget_losenord'
+  if (!(await verifyPassword(password, user.password_hash))) return 'fel'
+  if (!user.approved && !isAdminEmail(c.env, email)) return 'avstangd'
+  await startSession(c, user.id)
+  return 'ok'
+}
+
+// ---------- Engångskod på mejl (alternativ väg in) ----------
 
 async function hashCode(env: Env, email: string, code: string) {
   const data = new TextEncoder().encode(`${email}:${code}:${env.SESSION_SECRET}`)
@@ -159,15 +280,8 @@ export async function verifyCode(c: Context<App>, email: string, code: string): 
   const user = await c.env.DB.prepare('SELECT id FROM users WHERE email = ? AND approved = 1').bind(email).first<{ id: number }>()
   if (!user) return 'expired'
 
-  const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400
-  const token = await sign({ uid: user.id, exp }, c.env.SESSION_SECRET)
-  setCookie(c, SESSION_COOKIE, token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: SESSION_DAYS * 86400 })
+  await startSession(c, user.id)
   return 'ok'
-}
-
-export function logout(c: Context<App>) {
-  deleteCookie(c, SESSION_COOKIE, { path: '/' })
-  return c.redirect('/login')
 }
 
 // ---------- E-post via Resend ----------

@@ -29,5 +29,5 @@
     "STREAM_MAX_SECONDS": "1800"
   }
   // Secrets sätts i dashboarden eller med `wrangler secret put`:
-  //   SESSION_SECRET, RESEND_API_KEY, CF_STREAM_API_TOKEN
+  //   SESSION_SECRET, RESEND_API_KEY, REGISTRATION_CODE, CF_STREAM_API_TOKEN
 }

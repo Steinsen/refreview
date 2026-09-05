@@ -1,6 +1,6 @@
 # RefReview
 
-Stängd app för basketdomare: ladda upp ett klipp direkt från mobilen eller datorn, skriv vad du vill att gruppen tittar på, och diskutera i kommentarer (gärna med tidpunkt, t.ex. `1:42`). Inloggning med en engångskod på e-post – vilken adress som helst, inget lösenord – och bara adresser som admin lagt till kommer in.
+Stängd app för basketdomare: ladda upp ett klipp direkt från mobilen eller datorn, skriv vad du vill att gruppen tittar på, och diskutera i kommentarer (gärna med tidpunkt, t.ex. `1:42`). Domarna skapar konto själva med en **registreringskod** som du delar ut – e-post och lösenord, inget mejlutskick behövs. Engångskod på mejl finns kvar som alternativ när Resend är uppsatt.
 
 Kör på Cloudflare Workers + D1 + Stream. Videofilerna går direkt från webbläsaren till Cloudflare Stream (återupptagbar uppladdning, upp till 5 GB), transkodas för alla enheter och spelas bara upp med en signerad länk som appen skapar för inloggade användare. Inget byggsteg, inget ramverk i webbläsaren.
 
@@ -9,7 +9,9 @@ Appen använder Svensk Baskets färger (mörkblått + gult). Färgkoderna ligger
 
 ## Uppsättning (ca 20 minuter, allt i webbläsaren)
 
-### 1. E-post för inloggningskoder (Resend)
+### 1. E-post för inloggningskoder (Resend) – valfritt
+Behövs bara om du vill kunna logga in med engångskod på mejl. Registrering och inloggning med lösenord fungerar utan det här steget.
+
 1. Skapa konto på <https://resend.com> (gratis upp till 3000 mejl/månad).
 2. **Domains → Add domain** → t.ex. `steinsen.com` (eller en subdomän som `app.steinsen.com`). Lägg in DNS-posterna Resend visar hos den som sköter domänens DNS idag. E-posten i övrigt påverkas inte – det är bara avsändarrättigheter för den här appen.
 3. **API Keys → Create** → spara som secret `RESEND_API_KEY` (steg 3.6 nedan).
@@ -32,19 +34,24 @@ Ingen "customer code" behöver konfigureras – appen läser den från Stream-AP
    (Alternativt `npx wrangler d1 migrations apply refreview --remote` om du kör wrangler lokalt.)
 5. I `wrangler.jsonc`: sätt `ADMIN_EMAILS` till din Gmail-adress och `APP_URL` till workerns adress.
 6. Under workerns **Settings → Variables and Secrets**, lägg till secrets:
-   - `RESEND_API_KEY` – från steg 1.3
    - `SESSION_SECRET` – en lång slumpad sträng (t.ex. 40+ tecken)
+   - `REGISTRATION_CODE` – koden domarna anger när de skapar konto, t.ex. `domare2026`. Sätt den inte, så kan bara du och adresser du lagt till under **Admin** skapa konto.
    - `CF_STREAM_API_TOKEN` – från steg 2.2
+   - `RESEND_API_KEY` – från steg 1.3 (valfritt, bara för inloggning med mejlad kod)
 7. Pusha till GitHub → Cloudflare deployar. Klart.
 
 Varje push till main deployar en ny version automatiskt.
 
 ### 4. Första inloggningen och användare
-Skriv in adressen du satte i `ADMIN_EMAILS` på inloggningssidan – du får en kod på mejlen och blir admin direkt. Första gången frågar appen efter ditt namn.
+Gå till `/registrera` och skapa konto med adressen du satte i `ADMIN_EMAILS`. Adresser i `ADMIN_EMAILS` behöver ingen registreringskod och blir admin direkt. Adminsidan ligger sedan på `/admin` (och som **Admin** i menyn högst upp).
 
-Under **Admin** klistrar du in domarnas e-postadresser. Det är hela användarhanteringen: står adressen på listan kan personen logga in, annars inte. "Stäng av" tar bort åtkomsten men behåller personens kommentarer; "Släpp in igen" ångrar.
+Så kommer en domare in: **Skapa konto** → namn, e-post, lösenord och registreringskoden du delat ut → inloggad direkt, i 30 dagar på den enheten. Nästa gång: e-post + lösenord på startsidan.
 
-Så loggar en domare in: skriver sin e-postadress → får en sexsiffrig kod (gäller 10 minuter, max 5 försök) → skriver in koden → inloggad i 30 dagar på den enheten.
+Under **Admin** ser du registreringskoden att dela ut, och kan dessutom lägga till enskilda e-postadresser. De adresserna kan skapa konto **utan** registreringskod – bra om du inte vill sprida koden. "Stäng av" tar bort åtkomsten men behåller personens kommentarer; "Släpp in igen" ångrar. "Nollställ lösenord" används när någon glömt sitt: personen skapar då konto på nytt med samma adress och behåller sina klipp och kommentarer.
+
+Vill du byta registreringskod: ändra secreten `REGISTRATION_CODE` i dashboarden. Redan skapade konton påverkas inte.
+
+Är Resend uppsatt finns även den gamla vägen in längst ned på inloggningssidan: skriv e-postadressen → sexsiffrig kod på mejlen (gäller 10 minuter, max 5 försök). Den fungerar bara för adresser som redan finns i användarlistan.
 
 ## Hur domarna lägger upp klipp
 **Lägg upp klipp** → välj videofil (fungerar direkt från kamerarullen på mobilen) → rubrik och kommentar → **Lägg upp**. Uppladdningen visar förlopp och återupptas om uppkopplingen bryts. Efter uppladdning bearbetar Stream filen i någon minut; sidan uppdaterar sig själv tills klippet går att spela.
@@ -63,7 +70,7 @@ Med tom `RESEND_API_KEY` skrivs inloggningskoden ut i terminalen i stället för
 ## Struktur
 ```
 src/index.ts    routes (klipp, kommentarer, admin)
-src/auth.ts     Engångskod via e-post (Resend) + signerad sessionscookie (JWT, 30 dagar)
+src/auth.ts     Registrering + lösenord (PBKDF2), engångskod via e-post (Resend), sessionscookie (JWT, 30 dagar)
 src/stream.ts   Cloudflare Stream-API (uppladdning, status, signerad token, radering)
 src/views.ts    all HTML + CSS (färgvariabler längst upp)
 public/         statiska filer: favicon, logotyp
@@ -71,6 +78,7 @@ migrations/     D1-schema
 ```
 
 ## Sådant som medvetet saknas i första versionen
+- Glömt lösenord-flöde som användaren klarar själv (admin nollställer i stället)
 - Redigera klipp/kommentarer (radera finns)
 - Svar på kommentarer/trådar
 - Notiser via e-post

@@ -4,16 +4,16 @@ Stängd webbapp där basketdomare laddar upp matchklipp och diskuterar bedömnin
 
 ## Stack – ändra inte utan att fråga
 - **Cloudflare Workers** med **Hono** (routing, HTML via `hono/html`, JWT, cookies)
-- **D1** (SQLite) för användare, klipp, kommentarer, inloggningskoder
+- **D1** (SQLite) för användare (lösenordshash med PBKDF2), klipp, kommentarer, inloggningskoder
 - **Cloudflare Stream** för video: direktuppladdning med tus från webbläsaren, signerade uppspelningslänkar
-- **Resend** för inloggningsmejl
+- **Resend** för inloggningsmejl (valfritt – huvudvägen in är lösenord)
 - Server-renderad HTML, ett CSS-block, ingen frontend-ramverk, inget byggsteg. Enda klient-JS: tus-uppladdning (`/ny`), auto-reload under bearbetning (`/klipp/:id`), `confirm()` vid radering.
 - TypeScript strict. Ingen ORM, ingen validation-lib – prepared statements och manuella kontroller räcker.
 
 ## Filer
 ```
 src/index.ts      alla routes + CSP-headers + hjälpfunktioner (parseTimestamp)
-src/auth.ts       Env-typ, session (JWT HS256 i cookie rr_session, 30 dagar), engångskod, Resend, middleware
+src/auth.ts       Env-typ, session (JWT HS256 i cookie dv_session, 30 dagar), registrering + lösenord, engångskod, Resend, middleware
 src/stream.ts     Stream-API: createTusUpload, getStatus, signedToken, deleteVideo, playerUrl
 src/views.ts      alla sidor som funktioner som returnerar html``; CSS-konstant längst upp
 migrations/       D1-schema, numrerade filer. Ny ändring = ny fil, redigera aldrig en körd migration
@@ -35,14 +35,14 @@ Deploy sker via GitHub → Cloudflare Workers Builds vid push till main. Kör in
 Lokalt röktest utan riktiga tjänster: sätt `database_id` tillfälligt till ett dummy-UUID, `CF_STREAM_API_TOKEN=x`, tom `RESEND_API_KEY`. Inloggningskoden syns i dev-loggen. Stream-anrop misslyckas lokalt – det är förväntat; testa uppladdning bara mot riktigt konto.
 
 ## Domänmodell
-- `users`: `approved` = har tillgång (1) / avstängd (0). Användare skapas **bara** av admin (e-postlista) eller automatiskt för adresser i `ADMIN_EMAILS`. `name === email` betyder "har inte satt namn ännu" → middleware skickar till `/namn`.
+- `users`: `approved` = har tillgång (1) / avstängd (0). `password_hash` = `pbkdf2$<iterationer>$<salt>$<hash>`, NULL = inget lösenord satt ännu (tillagd av admin, eller nollställt). Konto skapas på `/registrera` med `REGISTRATION_CODE`; adresser i `ADMIN_EMAILS` och adresser admin lagt till slipper koden. `name === email` betyder "har inte satt namn ännu" → middleware skickar till `/namn` (gäller bara konton som kommit in via mejlkoden).
 - `videos.status`: `uploading` → `processing` → `ready` | `error`. Uppdateras när någon öppnar klippsidan (pollar Stream). `stream_uid` är nyckeln mot Stream. `customer_code` (för spelar-URL:en) läses ur Stream-svarets `preview`-fält och sparas per video – ingen konfig behövs.
 - `comments.timestamp_s`: sekunder i klippet, null = ingen tidpunkt. Visas som `m:ss`.
 - `login_codes`: hashad kod, 10 min, max 5 försök, en aktiv per e-post.
 
 ## Regler och konventioner
-- **Svenska överallt** i UI, felmeddelanden, kommentarer i kod och commit-meddelanden. Routes på svenska (`/ny`, `/klipp/:id`, `/namn`, `/admin/bjud-in`).
-- Alla routes utom `/login*` går genom `requireApproved`; admin-routes genom `requireAdmin`. Nya routes ska följa samma mönster.
+- **Svenska överallt** i UI, felmeddelanden, kommentarer i kod och commit-meddelanden. Routes på svenska (`/ny`, `/klipp/:id`, `/namn`, `/registrera`, `/admin/bjud-in`).
+- Alla routes utom `/login*` och `/registrera` går genom `requireApproved`; admin-routes genom `requireAdmin`. Nya routes ska följa samma mönster.
 - Videofiler får aldrig passera workern – alltid direktuppladdning till Stream.
 - Uppspelning alltid via `signedToken` (kortlivad). Sätt inte `requireSignedURLs` till false.
 - Ändrar du HTML som laddar externa resurser: uppdatera CSP i `src/index.ts` (`secureHeaders`).

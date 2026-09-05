@@ -8,11 +8,16 @@ import {
   requireAdmin,
   requestCode,
   verifyCode,
+  register,
+  loginWithPassword,
+  registrationCode,
+  isAdminEmail,
   normalizeEmail,
   isValidEmail,
   logout,
+  MIN_PASSWORD,
 } from './auth'
-import { loginPage, codePage, namePage, indexPage, newVideoPage, videoPage, adminPage } from './views'
+import { loginPage, registerPage, codePage, namePage, indexPage, newVideoPage, videoPage, adminPage } from './views'
 import { createTusUpload, getStatus, signedToken, deleteVideo, playerUrl } from './stream'
 
 const app = new Hono<App>()
@@ -36,23 +41,72 @@ app.use(
 )
 app.use('*', loadUser)
 
-// ---------- Inloggning ----------
+// ---------- Inloggning och registrering ----------
 app.get('/login', (c) => {
   const u = c.get('user')
   if (u?.approved) return c.redirect('/')
   const fel = c.req.query('fel')
-  return c.html(loginPage({ error: fel === 'avstangd' ? 'Ditt konto är avstängt. Kontakta administratören.' : undefined }))
+  return c.html(
+    loginPage({
+      error: fel === 'avstangd' ? 'Ditt konto är avstängt. Kontakta administratören.' : undefined,
+      info: c.req.query('info') === 'utloggad' ? 'Du är utloggad.' : undefined,
+    }),
+  )
 })
 
+/** Inloggning med lösenord. */
 app.post('/login', async (c) => {
+  const form = await c.req.parseBody()
+  const email = normalizeEmail(String(form.email ?? ''))
+  const password = String(form.password ?? '')
+  if (!isValidEmail(email) || !password) return c.html(loginPage({ error: 'Fyll i e-postadress och lösenord.', email }), 400)
+  const result = await loginWithPassword(c, email, password)
+  if (result === 'ok') return c.redirect('/')
+  if (result === 'avstangd') return c.html(loginPage({ error: 'Ditt konto är avstängt. Kontakta administratören.', email }), 403)
+  if (result === 'inget_losenord')
+    return c.html(loginPage({ error: 'Adressen har inget lösenord ännu. Skapa konto i stället.', email }), 400)
+  return c.html(loginPage({ error: 'Fel e-postadress eller lösenord.', email }), 401)
+})
+
+app.get('/registrera', (c) => {
+  const u = c.get('user')
+  if (u?.approved) return c.redirect('/')
+  return c.html(registerPage({ needsCode: !!registrationCode(c.env) }))
+})
+
+app.post('/registrera', async (c) => {
+  const form = await c.req.parseBody()
+  const name = String(form.name ?? '').trim().replace(/\s+/g, ' ').slice(0, 80)
+  const email = normalizeEmail(String(form.email ?? ''))
+  const password = String(form.password ?? '')
+  const code = String(form.code ?? '')
+  const needsCode = !!registrationCode(c.env) && !isAdminEmail(c.env, email)
+  const back = (error: string, status: 400 | 403 | 409) =>
+    c.html(registerPage({ error, needsCode, values: { name, email } }), status)
+
+  if (name.length < 2) return back('Skriv ditt namn.', 400)
+  if (!isValidEmail(email)) return back('Skriv en giltig e-postadress.', 400)
+  if (password.length < MIN_PASSWORD) return back(`Lösenordet måste vara minst ${MIN_PASSWORD} tecken.`, 400)
+  if (password.length > 200) return back('Lösenordet är för långt.', 400)
+
+  const result = await register(c, { name, email, password, code })
+  if (result === 'ok') return c.redirect('/')
+  if (result === 'finns_redan') return back('Adressen har redan ett konto. Logga in i stället.', 409)
+  if (result === 'fel_kod') return back('Fel registreringskod. Kontrollera med den som bjöd in dig.', 403)
+  if (result === 'avstangd') return back('Adressen är avstängd. Kontakta administratören.', 403)
+  return back('Registrering är inte öppen ännu. Be administratören om en registreringskod.', 403)
+})
+
+/** Alternativ väg in: engångskod på mejl (kräver att Resend är uppsatt). */
+app.post('/login/mejl', async (c) => {
   const form = await c.req.parseBody()
   const email = normalizeEmail(String(form.email ?? ''))
   if (!isValidEmail(email)) return c.html(loginPage({ error: 'Skriv en giltig e-postadress.' }), 400)
   const result = await requestCode(c.env, email)
   if (result === 'not_allowed')
-    return c.html(loginPage({ error: `${email} finns inte med bland dem som har tillgång. Be administratören lägga till dig.` }), 403)
+    return c.html(loginPage({ error: `${email} finns inte med bland dem som har tillgång. Skapa konto med registreringskod i stället.` }), 403)
   if (result === 'send_failed')
-    return c.html(loginPage({ error: 'Kunde inte skicka mejlet just nu. Försök igen om en stund.' }), 502)
+    return c.html(loginPage({ error: 'Kunde inte skicka mejlet just nu. Logga in med lösenord eller skapa konto i stället.' }), 502)
   return c.html(codePage(email))
 })
 
@@ -224,10 +278,17 @@ app.post('/klipp/:id/radera', requireAdmin, async (c) => {
 // ---------- Admin ----------
 app.get('/admin', requireAdmin, async (c) => {
   const { results } = await c.env.DB.prepare(
-    'SELECT id, email, name, approved, is_admin FROM users ORDER BY approved ASC, created_at DESC',
+    'SELECT id, email, name, approved, is_admin, password_hash FROM users ORDER BY approved ASC, created_at DESC',
   ).all<User>()
   const q = c.req.query()
-  return c.html(adminPage(c.get('user')!, results, { added: q.added ? Number(q.added) : undefined, error: q.fel }))
+  return c.html(
+    adminPage(c.get('user')!, results, {
+      added: q.added ? Number(q.added) : undefined,
+      error: q.fel,
+      info: q.info,
+      registrationCode: registrationCode(c.env),
+    }),
+  )
 })
 app.post('/admin/bjud-in', requireAdmin, async (c) => {
   const form = await c.req.parseBody()
@@ -248,6 +309,12 @@ app.post('/admin/bjud-in', requireAdmin, async (c) => {
 app.post('/admin/:id/godkann', requireAdmin, async (c) => {
   await c.env.DB.prepare('UPDATE users SET approved = 1 WHERE id = ?').bind(Number(c.req.param('id'))).run()
   return c.redirect('/admin')
+})
+app.post('/admin/:id/nollstall-losenord', requireAdmin, async (c) => {
+  const id = Number(c.req.param('id'))
+  if (id === c.get('user')!.id) return c.redirect('/admin')
+  await c.env.DB.prepare('UPDATE users SET password_hash = NULL WHERE id = ?').bind(id).run()
+  return c.redirect('/admin?info=' + encodeURIComponent('Lösenordet är nollställt. Personen skapar konto på nytt med samma adress.'))
 })
 app.post('/admin/:id/stang', requireAdmin, async (c) => {
   const id = Number(c.req.param('id'))
