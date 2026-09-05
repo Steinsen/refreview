@@ -107,8 +107,13 @@ async function startSession(c: Context<App>, userId: number) {
   setCookie(c, SESSION_COOKIE, token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: SESSION_DAYS * 86400 })
 }
 
-export function logout(c: Context<App>) {
+/** Tar bort sessionscookien utan att omdirigera. */
+export function clearSession(c: Context<App>) {
   deleteCookie(c, SESSION_COOKIE, { path: '/' })
+}
+
+export function logout(c: Context<App>) {
+  clearSession(c)
   return c.redirect('/login?info=utloggad')
 }
 
