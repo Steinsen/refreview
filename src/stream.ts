@@ -34,21 +34,24 @@ export async function createTusUpload(env: Env, opts: { sizeBytes: number; name:
   return { uploadUrl, uid }
 }
 
-export type StreamStatus = { ready: boolean; error: boolean; durationS: number | null; state: string }
+export type StreamStatus = { ready: boolean; error: boolean; durationS: number | null; state: string; customerCode: string | null }
 
 export async function getStatus(env: Env, uid: string): Promise<StreamStatus | null> {
   const res = await fetch(api(env, `/${uid}`), { headers: headers(env) })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Stream svarade ${res.status}`)
   const data = (await res.json()) as {
-    result: { readyToStream: boolean; duration: number; status: { state: string } }
+    result: { readyToStream: boolean; duration: number; status: { state: string }; preview?: string }
   }
   const r = data.result
+  // preview ser ut som https://customer-XXXX.cloudflarestream.com/<uid>/watch – kundkoden plockas därifrån
+  const m = r.preview?.match(/customer-([a-z0-9]+)\.cloudflarestream\.com/i)
   return {
     ready: r.readyToStream,
     error: r.status.state === 'error',
     durationS: r.duration > 0 ? Math.round(r.duration) : null,
     state: r.status.state,
+    customerCode: m ? m[1] : null,
   }
 }
 
@@ -69,6 +72,6 @@ export async function deleteVideo(env: Env, uid: string) {
   if (!res.ok && res.status !== 404) throw new Error(`Kunde inte radera video (${res.status})`)
 }
 
-export function playerUrl(env: Env, token: string) {
-  return `https://customer-${env.STREAM_CUSTOMER_CODE}.cloudflarestream.com/${token}/iframe`
+export function playerUrl(customerCode: string, token: string) {
+  return `https://customer-${customerCode}.cloudflarestream.com/${token}/iframe`
 }

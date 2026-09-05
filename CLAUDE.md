@@ -36,7 +36,7 @@ Lokalt röktest utan riktiga tjänster: sätt `database_id` tillfälligt till et
 
 ## Domänmodell
 - `users`: `approved` = har tillgång (1) / avstängd (0). Användare skapas **bara** av admin (e-postlista) eller automatiskt för adresser i `ADMIN_EMAILS`. `name === email` betyder "har inte satt namn ännu" → middleware skickar till `/namn`.
-- `videos.status`: `uploading` → `processing` → `ready` | `error`. Uppdateras när någon öppnar klippsidan (pollar Stream). `stream_uid` är nyckeln mot Stream.
+- `videos.status`: `uploading` → `processing` → `ready` | `error`. Uppdateras när någon öppnar klippsidan (pollar Stream). `stream_uid` är nyckeln mot Stream. `customer_code` (för spelar-URL:en) läses ur Stream-svarets `preview`-fält och sparas per video – ingen konfig behövs.
 - `comments.timestamp_s`: sekunder i klippet, null = ingen tidpunkt. Visas som `m:ss`.
 - `login_codes`: hashad kod, 10 min, max 5 försök, en aktiv per e-post.
 

@@ -11,6 +11,7 @@ CREATE TABLE videos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
   stream_uid TEXT NOT NULL UNIQUE,
+  customer_code TEXT,                    -- kundkod för spelaren, läses från Stream-API:t vid första statuskollen
   status TEXT NOT NULL DEFAULT 'uploading', -- uploading | processing | ready | error
   duration_s INTEGER,
   description TEXT NOT NULL DEFAULT '',

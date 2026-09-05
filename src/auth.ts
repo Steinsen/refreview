@@ -12,7 +12,6 @@ export type Env = {
   RESEND_API_KEY: string
   CF_ACCOUNT_ID: string
   CF_STREAM_API_TOKEN: string
-  STREAM_CUSTOMER_CODE: string
   STREAM_MAX_SECONDS: string
 }
 

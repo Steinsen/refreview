@@ -19,9 +19,10 @@ Tills domänen är verifierad kan du testa med Resends testavsändare `onboardin
 
 ### 2. Cloudflare Stream
 1. **Stream** i dashboarden → aktivera (kräver betalkort; ca 5 USD per 1000 lagrade minuter och 1 USD per 1000 visade minuter).
-2. Under **Stream → Settings** hittar du din *customer code* (`customer-xxxx.cloudflarestream.com`) → skriv in i `wrangler.jsonc` som `STREAM_CUSTOMER_CODE`.
-3. Skapa en API-token: **My Profile → API Tokens → Create Token → Custom** med behörigheten *Account → Stream → Edit*. Spara den som secret `CF_STREAM_API_TOKEN` (steg 3.6 nedan).
-4. Ditt konto-ID står i högerkolumnen under Workers & Pages → `CF_ACCOUNT_ID` i `wrangler.jsonc`.
+2. Skapa en API-token: **My Profile → API Tokens → Create Token → Custom** med behörigheten *Account → Stream → Edit*. Spara den som secret `CF_STREAM_API_TOKEN` (steg 3.6 nedan).
+3. Ditt konto-ID står i högerkolumnen under Workers & Pages (eller i adressfältet: `dash.cloudflare.com/<konto-id>/...`) → `CF_ACCOUNT_ID` i `wrangler.jsonc`.
+
+Ingen "customer code" behöver konfigureras – appen läser den från Stream-API:t automatiskt.
 
 ### 3. Cloudflare Workers + D1
 1. Lägg koden i ett GitHub-repo.
@@ -33,7 +34,7 @@ Tills domänen är verifierad kan du testa med Resends testavsändare `onboardin
 6. Under workerns **Settings → Variables and Secrets**, lägg till secrets:
    - `RESEND_API_KEY` – från steg 1.3
    - `SESSION_SECRET` – en lång slumpad sträng (t.ex. 40+ tecken)
-   - `CF_STREAM_API_TOKEN` – från steg 2.3
+   - `CF_STREAM_API_TOKEN` – från steg 2.2
 7. Pusha till GitHub → Cloudflare deployar. Klart.
 
 Varje push till main deployar en ny version automatiskt.

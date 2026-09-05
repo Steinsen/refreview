@@ -1,0 +1,4 @@
+SESSION_SECRET=slumpa-en-lang-strang-har
+# Lämna RESEND_API_KEY tom lokalt så skrivs koden ut i terminalen i stället för att mejlas
+RESEND_API_KEY=
+CF_STREAM_API_TOKEN=api-token-med-Stream-Edit

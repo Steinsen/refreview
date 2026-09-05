@@ -140,18 +140,23 @@ app.post('/api/uppladdning/:id/klar', requireApproved, async (c) => {
 app.get('/klipp/:id', requireApproved, async (c) => {
   const id = Number(c.req.param('id'))
   const video = await c.env.DB.prepare(
-    `SELECT v.id, v.title, v.stream_uid, v.status, v.duration_s, v.description, v.created_at, u.name AS author
+    `SELECT v.id, v.title, v.stream_uid, v.customer_code, v.status, v.duration_s, v.description, v.created_at, u.name AS author
      FROM videos v JOIN users u ON u.id = v.user_id WHERE v.id = ?`,
   )
     .bind(id)
-    .first<{ id: number; stream_uid: string; status: string; duration_s: number | null } & Record<string, unknown>>()
+    .first<{ id: number; stream_uid: string; customer_code: string | null; status: string; duration_s: number | null } & Record<string, unknown>>()
   if (!video) return c.notFound()
 
-  // Fråga Stream om status tills videon är klar, spara resultatet
-  if (video.status !== 'ready' && video.status !== 'error') {
+  // Fråga Stream om status tills videon är klar, spara resultatet (inkl. kundkod första gången)
+  let customerCode: string | null = video.customer_code
+  if ((video.status !== 'ready' && video.status !== 'error') || !customerCode) {
     try {
       const st = await getStatus(c.env, video.stream_uid)
-      if (st?.ready) {
+      if (st?.customerCode && !customerCode) {
+        customerCode = st.customerCode
+        await c.env.DB.prepare('UPDATE videos SET customer_code = ? WHERE id = ?').bind(customerCode, id).run()
+      }
+      if (st?.ready && video.status !== 'ready') {
         video.status = 'ready'
         video.duration_s = st.durationS
         await c.env.DB.prepare("UPDATE videos SET status = 'ready', duration_s = ? WHERE id = ?").bind(st.durationS, id).run()
@@ -164,9 +169,9 @@ app.get('/klipp/:id', requireApproved, async (c) => {
     }
   }
   let player: string | null = null
-  if (video.status === 'ready') {
+  if (video.status === 'ready' && customerCode) {
     try {
-      player = playerUrl(c.env, await signedToken(c.env, video.stream_uid))
+      player = playerUrl(customerCode, await signedToken(c.env, video.stream_uid))
     } catch (e) {
       console.error(e)
     }
