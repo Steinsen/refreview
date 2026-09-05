@@ -1,6 +1,6 @@
 # RefReview
 
-Stängd app för basketdomare: ladda upp ett klipp direkt från mobilen eller datorn, skriv vad du vill att gruppen tittar på, och diskutera i kommentarer (gärna med tidpunkt, t.ex. `1:42`). Domarna skapar konto själva med en **registreringskod** som du delar ut – e-post och lösenord, inget mejlutskick behövs. Engångskod på mejl finns kvar som alternativ när Resend är uppsatt.
+Stängd app för basketdomare: ladda upp ett klipp direkt från mobilen eller datorn, skriv vad du vill att gruppen tittar på, och diskutera i kommentarer (gärna med tidpunkt, t.ex. `1:42`). Domarna skapar konto själva med e-post och lösenord – inget mejlutskick behövs. Nya konton hamnar i en kö och kommer in först när admin godkänner dem; en valfri **registreringskod** kan sättas som filter före kön. Engångskod på mejl finns kvar som alternativ när Resend är uppsatt.
 
 Kör på Cloudflare Workers + D1 + Stream. Videofilerna går direkt från webbläsaren till Cloudflare Stream (återupptagbar uppladdning, upp till 5 GB), transkodas för alla enheter och spelas bara upp med en signerad länk som appen skapar för inloggade användare. Inget byggsteg, inget ramverk i webbläsaren.
 
@@ -35,7 +35,7 @@ Ingen "customer code" behöver konfigureras – appen läser den från Stream-AP
 5. I `wrangler.jsonc`: sätt `ADMIN_EMAILS` till din Gmail-adress och `APP_URL` till workerns adress.
 6. Under workerns **Settings → Variables and Secrets**, lägg till secrets:
    - `SESSION_SECRET` – en lång slumpad sträng (t.ex. 40+ tecken)
-   - `REGISTRATION_CODE` – koden domarna anger när de skapar konto, t.ex. `domare2026`. Sätt den inte, så kan bara du och adresser du lagt till under **Admin** skapa konto.
+   - `REGISTRATION_CODE` – valfri. Sätts den måste domarna ange koden för att få skapa konto (de hamnar sedan i godkännandekön ändå). Sätts den inte kan vem som helst fylla i formuläret, men ingen kommer in utan ditt godkännande.
    - `CF_STREAM_API_TOKEN` – från steg 2.2
    - `RESEND_API_KEY` – från steg 1.3 (valfritt, bara för inloggning med mejlad kod)
 7. Pusha till GitHub → Cloudflare deployar. Klart.
@@ -45,11 +45,17 @@ Varje push till main deployar en ny version automatiskt.
 ### 4. Första inloggningen och användare
 Gå till `/registrera` och skapa konto med adressen du satte i `ADMIN_EMAILS`. Adresser i `ADMIN_EMAILS` behöver ingen registreringskod och blir admin direkt. Adminsidan ligger sedan på `/admin` (och som **Admin** i menyn högst upp).
 
-Så kommer en domare in: **Skapa konto** → namn, e-post, lösenord och registreringskoden du delat ut → inloggad direkt, i 30 dagar på den enheten. Nästa gång: e-post + lösenord på startsidan.
+Så kommer en domare in: **Skapa konto** → namn, e-post, lösenord (och registreringskoden om du satt en) → kontot hamnar i kö → du godkänner det under **Admin** → personen loggar in med e-post och lösenord, och är inloggad i 30 dagar på den enheten.
 
-Under **Admin** ser du registreringskoden att dela ut, och kan dessutom lägga till enskilda e-postadresser. De adresserna kan skapa konto **utan** registreringskod – bra om du inte vill sprida koden. "Stäng av" tar bort åtkomsten men behåller personens kommentarer; "Släpp in igen" ångrar. "Nollställ lösenord" används när någon glömt sitt: personen skapar då konto på nytt med samma adress och behåller sina klipp och kommentarer.
+Vill du slippa godkänna en och en: lägg in adresserna under **Admin → Bjud in direkt**. De slipper både registreringskod och kö och kommer in så fort de satt ett lösenord.
 
-Vill du byta registreringskod: ändra secreten `REGISTRATION_CODE` i dashboarden. Redan skapade konton påverkas inte.
+Under **Admin** finns:
+- **Väntar på godkännande** – Godkänn eller Neka varje nytt konto.
+- **Har tillgång** – "Stäng av" tar bort åtkomsten men behåller personens klipp och kommentarer. "Nollställ lösenord" används när någon glömt sitt: personen skapar då konto på nytt med samma adress och behåller allt sitt innehåll.
+- **Nekade och avstängda** – "Släpp in" ångrar.
+- **Registreringskoden**, om du satt en, så du kan kopiera den till domarna. Byt kod genom att ändra secreten `REGISTRATION_CODE`; redan skapade konton påverkas inte.
+
+Alla inloggade byter sitt eget lösenord under **Lösenord** i menyn (`/losenord`).
 
 Är Resend uppsatt finns även den gamla vägen in längst ned på inloggningssidan: skriv e-postadressen → sexsiffrig kod på mejlen (gäller 10 minuter, max 5 försök). Den fungerar bara för adresser som redan finns i användarlistan.
 
@@ -79,6 +85,7 @@ migrations/     D1-schema
 
 ## Sådant som medvetet saknas i första versionen
 - Glömt lösenord-flöde som användaren klarar själv (admin nollställer i stället)
+- Bromsning av upprepade lösenordsgissningar
 - Redigera klipp/kommentarer (radera finns)
 - Svar på kommentarer/trådar
 - Notiser via e-post

@@ -22,6 +22,7 @@ export type User = {
   name: string
   approved: number
   is_admin: number
+  pending?: number
   password_hash?: string | null
 }
 
@@ -61,14 +62,15 @@ export const loadUser: MiddlewareHandler<App> = async (c, next) => {
   if (token) {
     try {
       const payload = (await verify(token, c.env.SESSION_SECRET, 'HS256')) as { uid: number }
-      const user = await c.env.DB.prepare('SELECT id, email, name, approved, is_admin FROM users WHERE id = ?')
+      const user = await c.env.DB.prepare('SELECT id, email, name, approved, is_admin, pending FROM users WHERE id = ?')
         .bind(payload.uid)
         .first<User>()
       if (user) {
         if (isAdminEmail(c.env, user.email) && (!user.is_admin || !user.approved)) {
-          await c.env.DB.prepare('UPDATE users SET is_admin = 1, approved = 1 WHERE id = ?').bind(user.id).run()
+          await c.env.DB.prepare('UPDATE users SET is_admin = 1, approved = 1, pending = 0 WHERE id = ?').bind(user.id).run()
           user.is_admin = 1
           user.approved = 1
+          user.pending = 0
         }
         c.set('user', user)
       }
@@ -150,44 +152,77 @@ export async function verifyPassword(password: string, stored: string) {
   return equalStrings(toBase64(got), hash)
 }
 
-// ---------- Registrering ----------
+// ---------- Byt lösenord ----------
 
-export type RegisterResult = 'ok' | 'finns_redan' | 'fel_kod' | 'stangd' | 'avstangd'
+export type ChangePasswordResult = 'ok' | 'fel_nuvarande'
 
 /**
- * Skapar ett konto med lösenord. Rätt registreringskod krävs, utom för
- * adresser i ADMIN_EMAILS och för dem som admin redan lagt till i listan.
+ * Byter lösenord på ett inloggat konto. Saknar kontot lösenord (kom in via mejlkoden,
+ * eller nollställt av admin) sätts det första utan att nuvarande lösenord krävs.
+ */
+export async function changePassword(
+  c: Context<App>,
+  userId: number,
+  current: string,
+  next: string,
+): Promise<ChangePasswordResult> {
+  const row = await c.env.DB.prepare('SELECT password_hash FROM users WHERE id = ?')
+    .bind(userId)
+    .first<{ password_hash: string | null }>()
+  if (row?.password_hash && !(await verifyPassword(current, row.password_hash))) return 'fel_nuvarande'
+  await c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(await hashPassword(next), userId).run()
+  return 'ok'
+}
+
+/** Har kontot ett lösenord satt? Styr om formuläret frågar efter det nuvarande. */
+export async function hasPassword(c: Context<App>, userId: number) {
+  const row = await c.env.DB.prepare('SELECT password_hash FROM users WHERE id = ?')
+    .bind(userId)
+    .first<{ password_hash: string | null }>()
+  return !!row?.password_hash
+}
+
+// ---------- Registrering ----------
+
+export type RegisterResult = 'ok' | 'vantar' | 'finns_redan' | 'fel_kod' | 'stangd' | 'avstangd'
+
+/**
+ * Skapar ett konto med lösenord. Är en registreringskod satt måste den stämma.
+ * Adresser i ADMIN_EMAILS och adresser som admin lagt till i listan släpps in direkt –
+ * alla andra hamnar i kö och kommer in först när admin godkänner dem.
  */
 export async function register(
   c: Context<App>,
   input: { name: string; email: string; password: string; code: string },
 ): Promise<RegisterResult> {
   const { name, email, password, code } = input
-  const existing = await c.env.DB.prepare('SELECT id, approved, password_hash FROM users WHERE email = ?')
+  const existing = await c.env.DB.prepare('SELECT id, approved, pending, password_hash FROM users WHERE email = ?')
     .bind(email)
-    .first<{ id: number; approved: number; password_hash: string | null }>()
+    .first<{ id: number; approved: number; pending: number; password_hash: string | null }>()
   if (existing?.password_hash) return 'finns_redan'
 
   const admin = isAdminEmail(c.env, email)
   const invited = !!existing && existing.approved === 1
-  if (!admin) {
-    if (existing && !existing.approved) return 'avstangd'
-    if (!invited) {
-      const expected = registrationCode(c.env)
-      if (!expected) return 'stangd'
-      if (!equalStrings(code.trim().toLowerCase(), expected.toLowerCase())) return 'fel_kod'
-    }
+  if (!admin && !invited) {
+    // Redan nekad eller avstängd adress får inte försöka igen
+    if (existing && !existing.approved && !existing.pending) return 'avstangd'
+    const expected = registrationCode(c.env)
+    if (expected && !equalStrings(code.trim().toLowerCase(), expected.toLowerCase())) return 'fel_kod'
   }
 
+  // Bara admin och inbjudna adresser kommer in direkt, övriga får vänta på godkännande
+  const approved = admin || invited
   const hash = await hashPassword(password)
   await c.env.DB.prepare(
-    `INSERT INTO users (email, name, approved, is_admin, password_hash) VALUES (?, ?, 1, ?, ?)
+    `INSERT INTO users (email, name, approved, is_admin, pending, password_hash) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(email) DO UPDATE SET name = excluded.name, password_hash = excluded.password_hash,
-       approved = 1, is_admin = MAX(users.is_admin, excluded.is_admin)`,
+       approved = excluded.approved, pending = excluded.pending,
+       is_admin = MAX(users.is_admin, excluded.is_admin)`,
   )
-    .bind(email, name, admin ? 1 : 0, hash)
+    .bind(email, name, approved ? 1 : 0, admin ? 1 : 0, approved ? 0 : 1, hash)
     .run()
 
+  if (!approved) return 'vantar'
   const user = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>()
   if (!user) return 'stangd'
   await startSession(c, user.id)
@@ -196,16 +231,16 @@ export async function register(
 
 // ---------- Inloggning med lösenord ----------
 
-export type LoginResult = 'ok' | 'fel' | 'inget_losenord' | 'avstangd'
+export type LoginResult = 'ok' | 'fel' | 'inget_losenord' | 'vantar' | 'avstangd'
 
 export async function loginWithPassword(c: Context<App>, email: string, password: string): Promise<LoginResult> {
-  const user = await c.env.DB.prepare('SELECT id, approved, password_hash FROM users WHERE email = ?')
+  const user = await c.env.DB.prepare('SELECT id, approved, pending, password_hash FROM users WHERE email = ?')
     .bind(email)
-    .first<{ id: number; approved: number; password_hash: string | null }>()
+    .first<{ id: number; approved: number; pending: number; password_hash: string | null }>()
   if (!user) return 'fel'
   if (!user.password_hash) return 'inget_losenord'
   if (!(await verifyPassword(password, user.password_hash))) return 'fel'
-  if (!user.approved && !isAdminEmail(c.env, email)) return 'avstangd'
+  if (!user.approved && !isAdminEmail(c.env, email)) return user.pending ? 'vantar' : 'avstangd'
   await startSession(c, user.id)
   return 'ok'
 }
