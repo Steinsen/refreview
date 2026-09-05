@@ -11,13 +11,15 @@ import {
   register,
   loginWithPassword,
   registrationCode,
+  changePassword,
+  hasPassword,
   isAdminEmail,
   normalizeEmail,
   isValidEmail,
   logout,
   MIN_PASSWORD,
 } from './auth'
-import { loginPage, registerPage, codePage, namePage, indexPage, newVideoPage, videoPage, adminPage } from './views'
+import { loginPage, registerPage, codePage, namePage, passwordPage, indexPage, newVideoPage, videoPage, adminPage } from './views'
 import { createTusUpload, getStatus, signedToken, deleteVideo, playerUrl } from './stream'
 
 const app = new Hono<App>()
@@ -49,7 +51,12 @@ app.get('/login', (c) => {
   return c.html(
     loginPage({
       error: fel === 'avstangd' ? 'Ditt konto är avstängt. Kontakta administratören.' : undefined,
-      info: c.req.query('info') === 'utloggad' ? 'Du är utloggad.' : undefined,
+      info:
+        c.req.query('info') === 'utloggad'
+          ? 'Du är utloggad.'
+          : c.req.query('info') === 'vantar'
+            ? 'Kontot är skapat. Administratören måste godkänna det innan du kommer in – du kan logga in när det är gjort.'
+            : undefined,
     }),
   )
 })
@@ -63,6 +70,8 @@ app.post('/login', async (c) => {
   const result = await loginWithPassword(c, email, password)
   if (result === 'ok') return c.redirect('/')
   if (result === 'avstangd') return c.html(loginPage({ error: 'Ditt konto är avstängt. Kontakta administratören.', email }), 403)
+  if (result === 'vantar')
+    return c.html(loginPage({ error: 'Kontot väntar på att administratören godkänner det. Försök igen senare.', email }), 403)
   if (result === 'inget_losenord')
     return c.html(loginPage({ error: 'Adressen har inget lösenord ännu. Skapa konto i stället.', email }), 400)
   return c.html(loginPage({ error: 'Fel e-postadress eller lösenord.', email }), 401)
@@ -91,10 +100,11 @@ app.post('/registrera', async (c) => {
 
   const result = await register(c, { name, email, password, code })
   if (result === 'ok') return c.redirect('/')
+  if (result === 'vantar') return c.redirect('/login?info=vantar')
   if (result === 'finns_redan') return back('Adressen har redan ett konto. Logga in i stället.', 409)
   if (result === 'fel_kod') return back('Fel registreringskod. Kontrollera med den som bjöd in dig.', 403)
   if (result === 'avstangd') return back('Adressen är avstängd. Kontakta administratören.', 403)
-  return back('Registrering är inte öppen ännu. Be administratören om en registreringskod.', 403)
+  return back('Registrering är stängd just nu. Kontakta administratören.', 403)
 })
 
 /** Alternativ väg in: engångskod på mejl (kräver att Resend är uppsatt). */
@@ -141,6 +151,30 @@ app.post('/namn', requireApproved, async (c) => {
   if (name.length < 2) return c.html(namePage(user, 'Skriv ditt namn.'), 400)
   await c.env.DB.prepare('UPDATE users SET name = ? WHERE id = ?').bind(name, user.id).run()
   return c.redirect('/')
+})
+
+// ---------- Byt lösenord ----------
+app.get('/losenord', requireApproved, async (c) => {
+  const user = c.get('user')!
+  return c.html(passwordPage(user, { hasPassword: await hasPassword(c, user.id), done: c.req.query('klart') === '1' }))
+})
+
+app.post('/losenord', requireApproved, async (c) => {
+  const user = c.get('user')!
+  const form = await c.req.parseBody()
+  const current = String(form.current ?? '')
+  const password = String(form.password ?? '')
+  const repeat = String(form.repeat ?? '')
+  const har = await hasPassword(c, user.id)
+  const back = (error: string) => c.html(passwordPage(user, { hasPassword: har, error }), 400)
+
+  if (password.length < MIN_PASSWORD) return back(`Lösenordet måste vara minst ${MIN_PASSWORD} tecken.`)
+  if (password.length > 200) return back('Lösenordet är för långt.')
+  if (password !== repeat) return back('De två nya lösenorden är inte lika.')
+
+  const result = await changePassword(c, user.id, current, password)
+  if (result === 'fel_nuvarande') return back('Fel nuvarande lösenord.')
+  return c.redirect('/losenord?klart=1')
 })
 
 // ---------- Klipp ----------
@@ -278,7 +312,7 @@ app.post('/klipp/:id/radera', requireAdmin, async (c) => {
 // ---------- Admin ----------
 app.get('/admin', requireAdmin, async (c) => {
   const { results } = await c.env.DB.prepare(
-    'SELECT id, email, name, approved, is_admin, password_hash FROM users ORDER BY approved ASC, created_at DESC',
+    'SELECT id, email, name, approved, is_admin, pending, password_hash FROM users ORDER BY approved ASC, pending DESC, created_at DESC',
   ).all<User>()
   const q = c.req.query()
   return c.html(
@@ -300,14 +334,14 @@ app.post('/admin/bjud-in', requireAdmin, async (c) => {
   await c.env.DB.batch(
     emails.map((e) =>
       c.env.DB.prepare(
-        'INSERT INTO users (email, name, approved) VALUES (?, ?, 1) ON CONFLICT(email) DO UPDATE SET approved = 1',
+        'INSERT INTO users (email, name, approved) VALUES (?, ?, 1) ON CONFLICT(email) DO UPDATE SET approved = 1, pending = 0',
       ).bind(e, e),
     ),
   )
   return c.redirect(`/admin?added=${emails.length}`)
 })
 app.post('/admin/:id/godkann', requireAdmin, async (c) => {
-  await c.env.DB.prepare('UPDATE users SET approved = 1 WHERE id = ?').bind(Number(c.req.param('id'))).run()
+  await c.env.DB.prepare('UPDATE users SET approved = 1, pending = 0 WHERE id = ?').bind(Number(c.req.param('id'))).run()
   return c.redirect('/admin')
 })
 app.post('/admin/:id/nollstall-losenord', requireAdmin, async (c) => {
@@ -319,7 +353,7 @@ app.post('/admin/:id/nollstall-losenord', requireAdmin, async (c) => {
 app.post('/admin/:id/stang', requireAdmin, async (c) => {
   const id = Number(c.req.param('id'))
   if (id === c.get('user')!.id) return c.redirect('/admin')
-  await c.env.DB.prepare('UPDATE users SET approved = 0 WHERE id = ? AND is_admin = 0').bind(id).run()
+  await c.env.DB.prepare('UPDATE users SET approved = 0, pending = 0 WHERE id = ? AND is_admin = 0').bind(id).run()
   return c.redirect('/admin')
 })
 

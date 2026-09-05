@@ -128,6 +128,7 @@ export function layout(title: string, user: User | null, body: HtmlEscapedString
   ${user ? html`<nav>
     <a href="/ny">Lägg upp klipp</a>
     ${user.is_admin ? html`<a href="/admin">Admin</a>` : ''}
+    <a href="/losenord">Lösenord</a>
     <a href="/logout">Logga ut</a>
   </nav>` : ''}
 </div></header>
@@ -168,7 +169,7 @@ export function registerPage(opts: { error?: string; needsCode: boolean; values?
   return layout('Skapa konto', null, html`
 <div class="login">
   <h1>Skapa konto</h1>
-  <p>Du behöver registreringskoden som administratören delat ut. Namnet visas vid dina klipp och kommentarer.</p>
+  <p>${opts.needsCode ? 'Du behöver registreringskoden som administratören delat ut. ' : ''}Nya konton godkänns av administratören innan de kommer in. Namnet visas vid dina klipp och kommentarer.</p>
   ${opts.error ? html`<div class="notice">${opts.error}</div>` : ''}
   <form method="post" action="/registrera">
     <label for="name">Namn</label>
@@ -215,6 +216,31 @@ export function namePage(user: User, error?: string) {
     <input type="text" id="name" name="name" required maxlength="80" autocomplete="name" placeholder="Förnamn Efternamn" autofocus>
     <p style="margin-top:16px"><button class="btn" type="submit">Spara</button></p>
   </form>
+</div>`)
+}
+
+export function passwordPage(user: User, opts: { hasPassword: boolean; error?: string; done?: boolean } = { hasPassword: true }) {
+  return layout('Byt lösenord', user, html`
+<div class="login">
+  <h1>${opts.hasPassword ? 'Byt lösenord' : 'Välj lösenord'}</h1>
+  <p>${opts.hasPassword
+    ? 'Skriv ditt nuvarande lösenord och det nya du vill ha.'
+    : 'Ditt konto har inget lösenord ännu – välj ett så kan du logga in med e-post och lösenord.'}</p>
+  ${opts.error ? html`<div class="notice">${opts.error}</div>` : ''}
+  ${opts.done ? html`<div class="notice">Lösenordet är ändrat.</div>` : ''}
+  <form method="post" action="/losenord">
+    ${opts.hasPassword
+      ? html`<label for="current">Nuvarande lösenord</label>
+    <input type="password" id="current" name="current" required autocomplete="current-password">`
+      : ''}
+    <label for="password">Nytt lösenord</label>
+    <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
+    <p class="hint">Minst 8 tecken.</p>
+    <label for="repeat">Nytt lösenord igen</label>
+    <input type="password" id="repeat" name="repeat" required minlength="8" autocomplete="new-password">
+    <p style="margin-top:18px"><button class="btn" type="submit">Spara lösenord</button></p>
+  </form>
+  <p class="hint"><a href="/">← Tillbaka till klippen</a></p>
 </div>`)
 }
 
@@ -351,21 +377,25 @@ export function adminPage(
   opts: { added?: number; error?: string; info?: string; registrationCode?: string } = {},
 ) {
   const { added, error, info, registrationCode } = opts
+  const waiting = users.filter((u) => !u.approved && u.pending)
   const active = users.filter((u) => u.approved)
-  const blocked = users.filter((u) => !u.approved)
-  const rows = (list: User[]) => html`<table>
+  const blocked = users.filter((u) => !u.approved && !u.pending)
+  const rows = (list: User[], kind: 'vantar' | 'aktiv' | 'nekad') => html`<table>
     <thead><tr><th>Namn</th><th>E-post</th><th>Roll</th><th></th></tr></thead>
     <tbody>${list.map(
       (u) => html`<tr>
-        <td>${u.name === u.email ? html`<span class="meta">Har inte loggat in ännu</span>` : u.name}</td><td>${u.email}</td><td>${u.is_admin ? 'Admin' : 'Domare'}${u.password_hash ? '' : html` <span class="meta">(inget lösenord)</span>`}</td>
+        <td>${u.name === u.email ? html`<span class="meta">Har inte loggat in ännu</span>` : u.name}</td><td>${u.email}</td><td>${u.is_admin ? 'Admin' : 'Domare'}${u.password_hash || kind !== 'aktiv' ? '' : html` <span class="meta">(inget lösenord)</span>`}</td>
         <td style="text-align:right">
           ${u.id === user.id
             ? html`<span class="meta">du</span>`
-            : u.approved
-              ? html`${u.password_hash
-                  ? html`<form method="post" action="/admin/${u.id}/nollstall-losenord" style="display:inline"><button class="btn danger" type="submit" onclick="return confirm('Nollställa lösenordet? Personen får skapa konto på nytt med samma adress.')">Nollställ lösenord</button></form> `
-                  : ''}<form method="post" action="/admin/${u.id}/stang" style="display:inline"><button class="btn danger" type="submit">Stäng av</button></form>`
-              : html`<form method="post" action="/admin/${u.id}/godkann" style="display:inline"><button class="btn" type="submit" style="padding:5px 12px;font-size:.9rem">Släpp in igen</button></form>`}
+            : kind === 'vantar'
+              ? html`<form method="post" action="/admin/${u.id}/godkann" style="display:inline"><button class="btn" type="submit" style="padding:5px 12px;font-size:.9rem">Godkänn</button></form>
+                <form method="post" action="/admin/${u.id}/stang" style="display:inline"><button class="btn danger" type="submit">Neka</button></form>`
+              : kind === 'aktiv'
+                ? html`${u.password_hash
+                    ? html`<form method="post" action="/admin/${u.id}/nollstall-losenord" style="display:inline"><button class="btn danger" type="submit" onclick="return confirm('Nollställa lösenordet? Personen får skapa konto på nytt med samma adress.')">Nollställ lösenord</button></form> `
+                    : ''}<form method="post" action="/admin/${u.id}/stang" style="display:inline"><button class="btn danger" type="submit">Stäng av</button></form>`
+                : html`<form method="post" action="/admin/${u.id}/godkann" style="display:inline"><button class="btn" type="submit" style="padding:5px 12px;font-size:.9rem">Släpp in</button></form>`}
         </td>
       </tr>`,
     )}</tbody></table>`
@@ -375,24 +405,31 @@ ${error ? html`<div class="notice">${error}</div>` : ''}
 ${info ? html`<div class="notice">${info}</div>` : ''}
 ${added ? html`<div class="notice">${added} ${added === 1 ? 'adress tillagd' : 'adresser tillagda'}.</div>` : ''}
 
-<h2>Registreringskod</h2>
-${registrationCode
-  ? html`<p>Dela den här koden med domarna. Med den skapar de konto själva på <a href="/registrera">/registrera</a> – inget mejl behövs.</p>
-<p class="notice" style="font-size:1.4rem;font-weight:700;letter-spacing:.05em">${registrationCode}</p>
-<p class="hint">Byt kod genom att ändra secreten <code>REGISTRATION_CODE</code> under workerns Settings → Variables and Secrets.</p>`
-  : html`<div class="notice">Ingen registreringskod är satt. Just nu kan bara du (adressen i ADMIN_EMAILS) och adresser du lagt till nedan skapa konto. Sätt secreten <code>REGISTRATION_CODE</code> under workerns Settings → Variables and Secrets för att öppna registrering för fler.</div>`}
+<h2>Väntar på godkännande (${waiting.length})</h2>
+${waiting.length
+  ? html`<p>De här har skapat konto men kommer inte in förrän du godkänner dem.</p>${rows(waiting, 'vantar')}`
+  : html`<div class="empty">Ingen väntar just nu.</div>`}
 
-<h2>Lägg till adresser</h2>
-<p>Adresser du lägger till här kan skapa konto <em>utan</em> registreringskod. Flera adresser går bra – en per rad eller med komma emellan.</p>
+<h2>Har tillgång (${active.length})</h2>
+${rows(active, 'aktiv')}
+${blocked.length ? html`<h2>Nekade och avstängda (${blocked.length})</h2>${rows(blocked, 'nekad')}` : ''}
+
+<h2>Bjud in direkt</h2>
+<p>Adresser du lägger till här slipper både registreringskod och godkännande – de kan skapa lösenord på <a href="/registrera">/registrera</a> och kommer in på en gång. Flera adresser går bra – en per rad eller med komma emellan.</p>
 <form method="post" action="/admin/bjud-in">
   <label for="emails">E-postadresser</label>
   <textarea id="emails" name="emails" required placeholder="anna@gmail.com&#10;erik@hotmail.com" style="min-height:80px"></textarea>
   <p style="margin-top:12px"><button class="btn" type="submit">Lägg till</button></p>
 </form>
-<h2>Har tillgång (${active.length})</h2>
-${rows(active)}
-${blocked.length ? html`<h2>Avstängda (${blocked.length})</h2>${rows(blocked)}` : ''}
-<p class="hint" style="margin-top:20px">"Stäng av" tar bort åtkomsten men behåller personens kommentarer. "Nollställ lösenord" används när någon glömt sitt – personen skapar då konto på nytt med samma adress. Adresser i ADMIN_EMAILS i wrangler.jsonc blir alltid admin.</p>`)
+
+<h2>Registreringskod</h2>
+${registrationCode
+  ? html`<p>Domare som inte står på listan ovan måste ange den här koden för att ens få skapa konto. Sedan hamnar de i kön.</p>
+<p class="notice" style="font-size:1.4rem;font-weight:700;letter-spacing:.05em">${registrationCode}</p>
+<p class="hint">Byt kod genom att ändra secreten <code>REGISTRATION_CODE</code> under workerns Settings → Variables and Secrets.</p>`
+  : html`<div class="notice">Ingen registreringskod är satt. Vem som helst kan då fylla i registreringsformuläret, men ingen kommer in utan att du godkänner. Sätt secreten <code>REGISTRATION_CODE</code> under workerns Settings → Variables and Secrets om du vill ha ett filter före kön.</div>`}
+
+<p class="hint" style="margin-top:20px">"Stäng av" och "Neka" tar bort åtkomsten men behåller personens klipp och kommentarer. "Nollställ lösenord" används när någon glömt sitt: personen skapar då konto på nytt med samma adress. Adresser i ADMIN_EMAILS i wrangler.jsonc blir alltid admin.</p>`)
 }
 
 function fmtDate(s: string) {

@@ -13,7 +13,7 @@ Stängd webbapp där basketdomare laddar upp matchklipp och diskuterar bedömnin
 ## Filer
 ```
 src/index.ts      alla routes + CSP-headers + hjälpfunktioner (parseTimestamp)
-src/auth.ts       Env-typ, session (JWT HS256 i cookie dv_session, 30 dagar), registrering + lösenord, engångskod, Resend, middleware
+src/auth.ts       Env-typ, session (JWT HS256 i cookie dv_session, 30 dagar), registrering + lösenord + byte, engångskod, Resend, middleware
 src/stream.ts     Stream-API: createTusUpload, getStatus, signedToken, deleteVideo, playerUrl
 src/views.ts      alla sidor som funktioner som returnerar html``; CSS-konstant längst upp
 migrations/       D1-schema, numrerade filer. Ny ändring = ny fil, redigera aldrig en körd migration
@@ -35,14 +35,14 @@ Deploy sker via GitHub → Cloudflare Workers Builds vid push till main. Kör in
 Lokalt röktest utan riktiga tjänster: sätt `database_id` tillfälligt till ett dummy-UUID, `CF_STREAM_API_TOKEN=x`, tom `RESEND_API_KEY`. Inloggningskoden syns i dev-loggen. Stream-anrop misslyckas lokalt – det är förväntat; testa uppladdning bara mot riktigt konto.
 
 ## Domänmodell
-- `users`: `approved` = har tillgång (1) / avstängd (0). `password_hash` = `pbkdf2$<iterationer>$<salt>$<hash>`, NULL = inget lösenord satt ännu (tillagd av admin, eller nollställt). Konto skapas på `/registrera` med `REGISTRATION_CODE`; adresser i `ADMIN_EMAILS` och adresser admin lagt till slipper koden. `name === email` betyder "har inte satt namn ännu" → middleware skickar till `/namn` (gäller bara konton som kommit in via mejlkoden).
+- `users`: `approved` = har tillgång (1) / inte (0). `pending` = 1 tillsammans med `approved` = 0 betyder "väntar på godkännande", båda 0 betyder "nekad/avstängd". `password_hash` = `pbkdf2$<iterationer>$<salt>$<hash>`, NULL = inget lösenord satt ännu (tillagd av admin, eller nollställt). Konto skapas på `/registrera`: adresser i `ADMIN_EMAILS` och adresser admin lagt till kommer in direkt, alla andra hamnar i kön. Är `REGISTRATION_CODE` satt krävs den också, som filter före kön. `name === email` betyder "har inte satt namn ännu" → middleware skickar till `/namn` (gäller bara konton som kommit in via mejlkoden).
 - `videos.status`: `uploading` → `processing` → `ready` | `error`. Uppdateras när någon öppnar klippsidan (pollar Stream). `stream_uid` är nyckeln mot Stream. `customer_code` (för spelar-URL:en) läses ur Stream-svarets `preview`-fält och sparas per video – ingen konfig behövs.
 - `comments.timestamp_s`: sekunder i klippet, null = ingen tidpunkt. Visas som `m:ss`.
 - `login_codes`: hashad kod, 10 min, max 5 försök, en aktiv per e-post.
 
 ## Regler och konventioner
-- **Svenska överallt** i UI, felmeddelanden, kommentarer i kod och commit-meddelanden. Routes på svenska (`/ny`, `/klipp/:id`, `/namn`, `/registrera`, `/admin/bjud-in`).
-- Alla routes utom `/login*` och `/registrera` går genom `requireApproved`; admin-routes genom `requireAdmin`. Nya routes ska följa samma mönster.
+- **Svenska överallt** i UI, felmeddelanden, kommentarer i kod och commit-meddelanden. Routes på svenska (`/ny`, `/klipp/:id`, `/namn`, `/registrera`, `/losenord`, `/admin/bjud-in`).
+- Alla routes utom `/login*` och `/registrera` går genom `requireApproved` (även `/losenord`); admin-routes genom `requireAdmin`. Nya routes ska följa samma mönster.
 - Videofiler får aldrig passera workern – alltid direktuppladdning till Stream.
 - Uppspelning alltid via `signedToken` (kortlivad). Sätt inte `requireSignedURLs` till false.
 - Ändrar du HTML som laddar externa resurser: uppdatera CSP i `src/index.ts` (`secureHeaders`).
