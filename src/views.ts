@@ -164,12 +164,15 @@ export function loginPage(opts: { error?: string; info?: string; email?: string 
 </div>`)
 }
 
-export function registerPage(opts: { error?: string; needsCode: boolean; values?: { name?: string; email?: string } } = { needsCode: true }) {
+export function registerPage(
+  opts: { error?: string; info?: string; needsCode: boolean; values?: { name?: string; email?: string } } = { needsCode: true },
+) {
   const v = opts.values ?? {}
   return layout('Skapa konto', null, html`
 <div class="login">
   <h1>Skapa konto</h1>
   <p>${opts.needsCode ? 'Du behöver registreringskoden som administratören delat ut. ' : ''}Nya konton godkänns av administratören innan de kommer in. Namnet visas vid dina klipp och kommentarer.</p>
+  ${opts.info ? html`<div class="notice">${opts.info}</div>` : ''}
   ${opts.error ? html`<div class="notice">${opts.error}</div>` : ''}
   <form method="post" action="/registrera">
     <label for="name">Namn</label>
@@ -387,7 +390,7 @@ export function adminPage(
         <td>${u.name === u.email ? html`<span class="meta">Har inte loggat in ännu</span>` : u.name}</td><td>${u.email}</td><td>${u.is_admin ? 'Admin' : 'Domare'}${u.password_hash || kind !== 'aktiv' ? '' : html` <span class="meta">(inget lösenord)</span>`}</td>
         <td style="text-align:right">
           ${u.id === user.id
-            ? html`<span class="meta">du</span>`
+            ? html`<form method="post" action="/admin/${u.id}/nollstall-losenord" style="display:inline"><button class="btn danger" type="submit" onclick="return confirm('Nollställa ditt eget lösenord? Du loggas ut och får välja ett nytt lösenord på registreringssidan med samma e-postadress.')">Nollställ mitt lösenord</button></form>`
             : kind === 'vantar'
               ? html`<form method="post" action="/admin/${u.id}/godkann" style="display:inline"><button class="btn" type="submit" style="padding:5px 12px;font-size:.9rem">Godkänn</button></form>
                 <form method="post" action="/admin/${u.id}/stang" style="display:inline"><button class="btn danger" type="submit">Neka</button></form>`

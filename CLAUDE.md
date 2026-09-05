@@ -39,6 +39,7 @@ Lokalt röktest utan riktiga tjänster: sätt `database_id` tillfälligt till et
 - `videos.status`: `uploading` → `processing` → `ready` | `error`. Uppdateras när någon öppnar klippsidan (pollar Stream). `stream_uid` är nyckeln mot Stream. `customer_code` (för spelar-URL:en) läses ur Stream-svarets `preview`-fält och sparas per video – ingen konfig behövs.
 - `comments.timestamp_s`: sekunder i klippet, null = ingen tidpunkt. Visas som `m:ss`.
 - `login_codes`: hashad kod, 10 min, max 5 försök, en aktiv per e-post.
+- Sessionen är en signerad JWT utan serverstate: `approved`/`pending` läses ur databasen vid varje anrop (avstängning slår igenom direkt), men ett nollställt lösenord loggar **inte** ut redan inloggade enheter.
 
 ## Regler och konventioner
 - **Svenska överallt** i UI, felmeddelanden, kommentarer i kod och commit-meddelanden. Routes på svenska (`/ny`, `/klipp/:id`, `/namn`, `/registrera`, `/losenord`, `/admin/bjud-in`).

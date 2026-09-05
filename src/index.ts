@@ -13,6 +13,7 @@ import {
   registrationCode,
   changePassword,
   hasPassword,
+  clearSession,
   isAdminEmail,
   normalizeEmail,
   isValidEmail,
@@ -80,7 +81,15 @@ app.post('/login', async (c) => {
 app.get('/registrera', (c) => {
   const u = c.get('user')
   if (u?.approved) return c.redirect('/')
-  return c.html(registerPage({ needsCode: !!registrationCode(c.env) }))
+  return c.html(
+    registerPage({
+      needsCode: !!registrationCode(c.env),
+      info:
+        c.req.query('nollstallt') === '1'
+          ? 'Ditt lösenord är nollställt. Fyll i samma e-postadress som förut och välj ett nytt lösenord – dina klipp och kommentarer finns kvar.'
+          : undefined,
+    }),
+  )
 })
 
 app.post('/registrera', async (c) => {
@@ -346,7 +355,17 @@ app.post('/admin/:id/godkann', requireAdmin, async (c) => {
 })
 app.post('/admin/:id/nollstall-losenord', requireAdmin, async (c) => {
   const id = Number(c.req.param('id'))
-  if (id === c.get('user')!.id) return c.redirect('/admin')
+  const user = c.get('user')!
+  if (id === user.id) {
+    // Nollställer du ditt eget måste adressen stå i ADMIN_EMAILS, annars kommer du inte in igen
+    if (!isAdminEmail(c.env, user.email))
+      return c.redirect(
+        '/admin?fel=' + encodeURIComponent('Din adress står inte i ADMIN_EMAILS – nollställer du ditt lösenord kommer du inte in igen. Byt lösenord under Lösenord i stället.'),
+      )
+    await c.env.DB.prepare('UPDATE users SET password_hash = NULL WHERE id = ?').bind(id).run()
+    clearSession(c)
+    return c.redirect('/registrera?nollstallt=1')
+  }
   await c.env.DB.prepare('UPDATE users SET password_hash = NULL WHERE id = ?').bind(id).run()
   return c.redirect('/admin?info=' + encodeURIComponent('Lösenordet är nollställt. Personen skapar konto på nytt med samma adress.'))
 })

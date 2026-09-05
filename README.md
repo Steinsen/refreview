@@ -53,9 +53,20 @@ Under **Admin** finns:
 - **Väntar på godkännande** – Godkänn eller Neka varje nytt konto.
 - **Har tillgång** – "Stäng av" tar bort åtkomsten men behåller personens klipp och kommentarer. "Nollställ lösenord" används när någon glömt sitt: personen skapar då konto på nytt med samma adress och behåller allt sitt innehåll.
 - **Nekade och avstängda** – "Släpp in" ångrar.
+- **Din egen rad** – "Nollställ mitt lösenord" loggar ut dig och låter dig välja ett nytt på `/registrera` med samma adress. Fungerar eftersom din adress står i `ADMIN_EMAILS` och därför slipper både registreringskod och kö. Vill du bara byta lösenord och kan ditt nuvarande: använd **Lösenord** i menyn i stället.
 - **Registreringskoden**, om du satt en, så du kan kopiera den till domarna. Byt kod genom att ändra secreten `REGISTRATION_CODE`; redan skapade konton påverkas inte.
 
-Alla inloggade byter sitt eget lösenord under **Lösenord** i menyn (`/losenord`).
+Alla inloggade byter sitt eget lösenord under **Lösenord** i menyn (`/losenord`) – nuvarande lösenord krävs.
+
+### Om du blir utelåst
+Har du glömt admin-lösenordet kommer du inte in för att kunna nollställa det. Nollställ det då direkt i databasen: **Storage & Databases → D1 → refreview → Console**:
+```sql
+UPDATE users SET password_hash = NULL WHERE email = 'din@adress.se';
+```
+Gå sedan till `/registrera` och välj ett nytt lösenord med samma adress. Allt ditt innehåll finns kvar. Samma sak från terminalen:
+```
+npx wrangler d1 execute refreview --remote --command "UPDATE users SET password_hash = NULL WHERE email = 'din@adress.se'"
+```
 
 Är Resend uppsatt finns även den gamla vägen in längst ned på inloggningssidan: skriv e-postadressen → sexsiffrig kod på mejlen (gäller 10 minuter, max 5 försök). Den fungerar bara för adresser som redan finns i användarlistan.
 
@@ -86,6 +97,7 @@ migrations/     D1-schema
 ## Sådant som medvetet saknas i första versionen
 - Glömt lösenord-flöde som användaren klarar själv (admin nollställer i stället)
 - Bromsning av upprepade lösenordsgissningar
+- Att nollställa ett lösenord loggar inte ut redan inloggade enheter – sessionen gäller i 30 dagar oavsett (avstängning slår däremot igenom direkt)
 - Redigera klipp/kommentarer (radera finns)
 - Svar på kommentarer/trådar
 - Notiser via e-post
