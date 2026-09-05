@@ -57,7 +57,7 @@ p { margin: 0 0 12px; max-width: 64ch; }
 .btn.quiet { background: transparent; color: var(--ink); border: 1.5px solid var(--line); font-weight: 600; }
 .btn.danger { background: transparent; color: var(--danger); border: 1.5px solid var(--line); padding: 4px 10px; font-size: .85rem; font-weight: 600; min-height: 0; }
 .btn:disabled { opacity: .6; cursor: default; }
-input[type=text], input[type=email], input[type=url], textarea { width: 100%; font: inherit; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); min-height: 44px; }
+input[type=text], input[type=email], input[type=password], input[type=url], textarea { width: 100%; font: inherit; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); min-height: 44px; }
 input:focus, textarea:focus, .btn:focus, a:focus-visible { outline: 3px solid var(--sb-yellow); outline-offset: 1px; }
 textarea { min-height: 96px; resize: vertical; }
 label { display: block; font-weight: 600; font-size: .92rem; margin: 14px 0 5px; }
@@ -137,19 +137,54 @@ export function layout(title: string, user: User | null, body: HtmlEscapedString
 </html>`
 }
 
-export function loginPage(opts: { error?: string; info?: string } = {}) {
+export function loginPage(opts: { error?: string; info?: string; email?: string } = {}) {
   return layout('Logga in', null, html`
 <div class="login">
   <h1>RefReview</h1>
-  <p>Klipp och situationsdiskussioner för Svensk Baskets domare. Innehållet är stängt – du behöver vara tillagd av en administratör.</p>
+  <p>Klipp och situationsdiskussioner för Svensk Baskets domare. Innehållet är stängt – du behöver en registreringskod för att skapa konto.</p>
   ${opts.error ? html`<div class="notice">${opts.error}</div>` : ''}
   ${opts.info ? html`<div class="notice">${opts.info}</div>` : ''}
   <form method="post" action="/login">
-    <label for="email">Din e-postadress</label>
-    <input type="email" id="email" name="email" required autocomplete="email" inputmode="email" placeholder="namn@exempel.se">
-    <p style="margin-top:16px"><button class="btn" type="submit">Skicka inloggningskod</button></p>
+    <label for="email">E-postadress</label>
+    <input type="email" id="email" name="email" required autocomplete="email" inputmode="email" placeholder="namn@exempel.se" value="${opts.email ?? ''}">
+    <label for="password">Lösenord</label>
+    <input type="password" id="password" name="password" required autocomplete="current-password">
+    <p style="margin-top:16px"><button class="btn" type="submit">Logga in</button></p>
   </form>
-  <p class="hint">Du får en sexsiffrig kod på mejlen. Inget lösenord behövs.</p>
+  <p class="hint">Har du inget konto? <a href="/registrera">Skapa konto</a> med registreringskoden du fått.</p>
+
+  <h2>Eller få en kod på mejlen</h2>
+  <p class="hint">Fungerar bara om administratören lagt till din adress och mejlutskicket är igång.</p>
+  <form method="post" action="/login/mejl">
+    <label for="mejl">E-postadress</label>
+    <input type="email" id="mejl" name="email" required autocomplete="email" inputmode="email" placeholder="namn@exempel.se">
+    <p style="margin-top:16px"><button class="btn quiet" type="submit">Skicka inloggningskod</button></p>
+  </form>
+</div>`)
+}
+
+export function registerPage(opts: { error?: string; needsCode: boolean; values?: { name?: string; email?: string } } = { needsCode: true }) {
+  const v = opts.values ?? {}
+  return layout('Skapa konto', null, html`
+<div class="login">
+  <h1>Skapa konto</h1>
+  <p>Du behöver registreringskoden som administratören delat ut. Namnet visas vid dina klipp och kommentarer.</p>
+  ${opts.error ? html`<div class="notice">${opts.error}</div>` : ''}
+  <form method="post" action="/registrera">
+    <label for="name">Namn</label>
+    <input type="text" id="name" name="name" required maxlength="80" autocomplete="name" placeholder="Förnamn Efternamn" value="${v.name ?? ''}">
+    <label for="email">E-postadress</label>
+    <input type="email" id="email" name="email" required autocomplete="email" inputmode="email" placeholder="namn@exempel.se" value="${v.email ?? ''}">
+    <label for="password">Lösenord</label>
+    <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
+    <p class="hint">Minst 8 tecken.</p>
+    ${opts.needsCode
+      ? html`<label for="code">Registreringskod</label>
+    <input type="text" id="code" name="code" autocomplete="off" placeholder="Koden du fått av administratören">`
+      : ''}
+    <p style="margin-top:18px"><button class="btn" type="submit">Skapa konto</button></p>
+  </form>
+  <p class="hint">Har du redan ett konto? <a href="/login">Logga in</a>.</p>
 </div>`)
 }
 
@@ -165,7 +200,7 @@ export function codePage(email: string, error?: string) {
     <input type="text" id="code" name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" autofocus style="font-size:1.6rem;letter-spacing:.2em;max-width:220px">
     <p style="margin-top:16px"><button class="btn" type="submit">Logga in</button></p>
   </form>
-  <p class="hint">Inget mejl? Titta i skräpposten, eller <a href="/login">skicka en ny kod</a>.</p>
+  <p class="hint">Inget mejl? Titta i skräpposten, eller <a href="/login">be om en ny kod</a>.</p>
 </div>`)
 }
 
@@ -310,29 +345,45 @@ ${user.is_admin
   : ''}`)
 }
 
-export function adminPage(user: User, users: User[], opts: { added?: number; error?: string } = {}) {
-  const { added, error } = opts
+export function adminPage(
+  user: User,
+  users: User[],
+  opts: { added?: number; error?: string; info?: string; registrationCode?: string } = {},
+) {
+  const { added, error, info, registrationCode } = opts
   const active = users.filter((u) => u.approved)
   const blocked = users.filter((u) => !u.approved)
   const rows = (list: User[]) => html`<table>
     <thead><tr><th>Namn</th><th>E-post</th><th>Roll</th><th></th></tr></thead>
     <tbody>${list.map(
       (u) => html`<tr>
-        <td>${u.name === u.email ? html`<span class="meta">Har inte loggat in ännu</span>` : u.name}</td><td>${u.email}</td><td>${u.is_admin ? 'Admin' : 'Domare'}</td>
+        <td>${u.name === u.email ? html`<span class="meta">Har inte loggat in ännu</span>` : u.name}</td><td>${u.email}</td><td>${u.is_admin ? 'Admin' : 'Domare'}${u.password_hash ? '' : html` <span class="meta">(inget lösenord)</span>`}</td>
         <td style="text-align:right">
           ${u.id === user.id
             ? html`<span class="meta">du</span>`
             : u.approved
-              ? html`<form method="post" action="/admin/${u.id}/stang" style="display:inline"><button class="btn danger" type="submit">Stäng av</button></form>`
+              ? html`${u.password_hash
+                  ? html`<form method="post" action="/admin/${u.id}/nollstall-losenord" style="display:inline"><button class="btn danger" type="submit" onclick="return confirm('Nollställa lösenordet? Personen får skapa konto på nytt med samma adress.')">Nollställ lösenord</button></form> `
+                  : ''}<form method="post" action="/admin/${u.id}/stang" style="display:inline"><button class="btn danger" type="submit">Stäng av</button></form>`
               : html`<form method="post" action="/admin/${u.id}/godkann" style="display:inline"><button class="btn" type="submit" style="padding:5px 12px;font-size:.9rem">Släpp in igen</button></form>`}
         </td>
       </tr>`,
     )}</tbody></table>`
   return layout('Admin', user, html`
 <h1>Användare</h1>
-<p>Lägg till domarnas e-postadresser här. Sedan kan de logga in med en kod som skickas till adressen. Flera adresser går bra – en per rad eller med komma emellan.</p>
 ${error ? html`<div class="notice">${error}</div>` : ''}
+${info ? html`<div class="notice">${info}</div>` : ''}
 ${added ? html`<div class="notice">${added} ${added === 1 ? 'adress tillagd' : 'adresser tillagda'}.</div>` : ''}
+
+<h2>Registreringskod</h2>
+${registrationCode
+  ? html`<p>Dela den här koden med domarna. Med den skapar de konto själva på <a href="/registrera">/registrera</a> – inget mejl behövs.</p>
+<p class="notice" style="font-size:1.4rem;font-weight:700;letter-spacing:.05em">${registrationCode}</p>
+<p class="hint">Byt kod genom att ändra secreten <code>REGISTRATION_CODE</code> under workerns Settings → Variables and Secrets.</p>`
+  : html`<div class="notice">Ingen registreringskod är satt. Just nu kan bara du (adressen i ADMIN_EMAILS) och adresser du lagt till nedan skapa konto. Sätt secreten <code>REGISTRATION_CODE</code> under workerns Settings → Variables and Secrets för att öppna registrering för fler.</div>`}
+
+<h2>Lägg till adresser</h2>
+<p>Adresser du lägger till här kan skapa konto <em>utan</em> registreringskod. Flera adresser går bra – en per rad eller med komma emellan.</p>
 <form method="post" action="/admin/bjud-in">
   <label for="emails">E-postadresser</label>
   <textarea id="emails" name="emails" required placeholder="anna@gmail.com&#10;erik@hotmail.com" style="min-height:80px"></textarea>
@@ -341,7 +392,7 @@ ${added ? html`<div class="notice">${added} ${added === 1 ? 'adress tillagd' : '
 <h2>Har tillgång (${active.length})</h2>
 ${rows(active)}
 ${blocked.length ? html`<h2>Avstängda (${blocked.length})</h2>${rows(blocked)}` : ''}
-<p class="hint" style="margin-top:20px">"Stäng av" tar bort åtkomsten men behåller personens kommentarer. Adresser i ADMIN_EMAILS i wrangler.jsonc blir alltid admin.</p>`)
+<p class="hint" style="margin-top:20px">"Stäng av" tar bort åtkomsten men behåller personens kommentarer. "Nollställ lösenord" används när någon glömt sitt – personen skapar då konto på nytt med samma adress. Adresser i ADMIN_EMAILS i wrangler.jsonc blir alltid admin.</p>`)
 }
 
 function fmtDate(s: string) {

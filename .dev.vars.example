@@ -1,4 +1,6 @@
 SESSION_SECRET=slumpa-en-lang-strang-har
 # Lämna RESEND_API_KEY tom lokalt så skrivs koden ut i terminalen i stället för att mejlas
 RESEND_API_KEY=
+# Koden domarna anger när de skapar konto. Tom = bara ADMIN_EMAILS och inbjudna adresser kan registrera sig
+REGISTRATION_CODE=domare2026
 CF_STREAM_API_TOKEN=api-token-med-Stream-Edit
