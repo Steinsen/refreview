@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "refreview",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+  // Statiska filer (logotyp, favicon) – lägg förbundets logotyp som public/logo.svg
+  "assets": { "directory": "./public" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "refreview",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // Kommaseparerade e-postadresser som alltid är admin och godkända
+    "ADMIN_EMAILS": "din.adress@gmail.com",
+    // Publik adress till appen, utan avslutande snedstreck
+    "APP_URL": "https://refreview.DITT-KONTO.workers.dev",
+    // Namn som visas i appen och i inloggningsmejlen
+    "APP_NAME": "RefReview",
+    // Avsändare för inloggningskoder – domänen måste vara verifierad hos Resend
+    "MAIL_FROM": "RefReview <inloggning@steinsen.com>",
+    // Cloudflare-konto-ID (Dashboard → Workers & Pages, högerkolumnen)
+    "CF_ACCOUNT_ID": "ERSATT",
+    // Stream customer code (Dashboard → Stream → Settings, "customer-xxxx.cloudflarestream.com")
+    "STREAM_CUSTOMER_CODE": "ERSATT",
+    // Max längd per klipp i sekunder
+    "STREAM_MAX_SECONDS": "1800"
+  }
+  // Secrets sätts i dashboarden eller med `wrangler secret put`:
+  //   SESSION_SECRET, RESEND_API_KEY, CF_STREAM_API_TOKEN
+}
