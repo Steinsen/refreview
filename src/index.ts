@@ -20,7 +20,7 @@ import {
   logout,
   MIN_PASSWORD,
 } from './auth'
-import { loginPage, registerPage, codePage, namePage, passwordPage, indexPage, newVideoPage, videoPage, adminPage } from './views'
+import { VISSELPIPOR_PA, loginPage, registerPage, codePage, namePage, passwordPage, indexPage, newVideoPage, videoPage, adminPage } from './views'
 import { createTusUpload, getStatus, signedToken, deleteVideo, playerUrl } from './stream'
 
 const app = new Hono<App>()
@@ -273,14 +273,16 @@ app.get('/klipp/:id', requireApproved, async (c) => {
       console.error(e)
     }
   }
-  const { results: comments } = await c.env.DB.prepare(
-    `SELECT k.id, k.body, k.timestamp_s, k.created_at, k.user_id, u.name AS author,
-            (SELECT COUNT(*) FROM whistles w WHERE w.comment_id = k.id) AS whistles,
-            EXISTS(SELECT 1 FROM whistles w WHERE w.comment_id = k.id AND w.user_id = ?) AS my_whistle
-     FROM comments k JOIN users u ON u.id = k.user_id WHERE k.video_id = ? ORDER BY k.created_at ASC`,
-  )
-    .bind(c.get('user')!.id, id)
-    .all()
+  const kommentarSql = `SELECT k.id, k.body, k.timestamp_s, k.created_at, k.user_id, u.name AS author
+     ${VISSELPIPOR_PA
+       ? `, (SELECT COUNT(*) FROM whistles w WHERE w.comment_id = k.id) AS whistles,
+            EXISTS(SELECT 1 FROM whistles w WHERE w.comment_id = k.id AND w.user_id = ?) AS my_whistle`
+       : ''}
+     FROM comments k JOIN users u ON u.id = k.user_id WHERE k.video_id = ? ORDER BY k.created_at ASC`
+  const { results: comments } = await (VISSELPIPOR_PA
+    ? c.env.DB.prepare(kommentarSql).bind(c.get('user')!.id, id)
+    : c.env.DB.prepare(kommentarSql).bind(id)
+  ).all()
   return c.html(videoPage(c.get('user')!, video as any, comments as any, player))
 })
 
@@ -297,8 +299,9 @@ app.post('/klipp/:id/kommentar', requireApproved, async (c) => {
   return c.redirect(`/klipp/${id}#kommentarer`)
 })
 
-/** Visselpipa av/på – samma knapp tar tillbaka den. */
+/** Visselpipa av/på – samma knapp tar tillbaka den. Avstängd så länge VISSELPIPOR_PA är false. */
 app.post('/kommentar/:id/visselpipa', requireApproved, async (c) => {
+  if (!VISSELPIPOR_PA) return c.notFound()
   const user = c.get('user')!
   const id = Number(c.req.param('id'))
   const k = await c.env.DB.prepare('SELECT video_id FROM comments WHERE id = ?').bind(id).first<{ video_id: number }>()
@@ -321,7 +324,7 @@ app.post('/kommentar/:id/radera', requireApproved, async (c) => {
   if (!k) return c.notFound()
   if (k.user_id !== user.id && !user.is_admin) return c.text('Inte din kommentar', 403)
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM whistles WHERE comment_id = ?').bind(id),
+    ...(VISSELPIPOR_PA ? [c.env.DB.prepare('DELETE FROM whistles WHERE comment_id = ?').bind(id)] : []),
     c.env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id),
   ])
   return c.redirect(`/klipp/${k.video_id}`)
@@ -332,7 +335,9 @@ app.post('/klipp/:id/radera', requireAdmin, async (c) => {
   const v = await c.env.DB.prepare('SELECT stream_uid FROM videos WHERE id = ?').bind(id).first<{ stream_uid: string }>()
   if (v) await deleteVideo(c.env, v.stream_uid).catch(console.error)
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM whistles WHERE comment_id IN (SELECT id FROM comments WHERE video_id = ?)').bind(id),
+    ...(VISSELPIPOR_PA
+      ? [c.env.DB.prepare('DELETE FROM whistles WHERE comment_id IN (SELECT id FROM comments WHERE video_id = ?)').bind(id)]
+      : []),
     c.env.DB.prepare('DELETE FROM comments WHERE video_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM videos WHERE id = ?').bind(id),
   ])
