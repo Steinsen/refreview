@@ -7,7 +7,7 @@ Stängd webbapp där basketdomare laddar upp matchklipp och diskuterar bedömnin
 - **D1** (SQLite) för användare (lösenordshash med PBKDF2), klipp, kommentarer, inloggningskoder
 - **Cloudflare Stream** för video: direktuppladdning med tus från webbläsaren, signerade uppspelningslänkar
 - **Resend** för inloggningsmejl (valfritt – huvudvägen in är lösenord)
-- Server-renderad HTML, ett CSS-block, ingen frontend-ramverk, inget byggsteg. Enda klient-JS: tus-uppladdning (`/ny`), auto-reload under bearbetning (`/klipp/:id`), `confirm()` vid radering.
+- Server-renderad HTML, ett CSS-block, ingen frontend-ramverk, inget byggsteg. Klient-JS bara där det behövs: tus-uppladdning (`/ny`), auto-reload under bearbetning och spelarstyrning (`/klipp/:id`), `confirm()` vid radering.
 - TypeScript strict. Ingen ORM, ingen validation-lib – prepared statements och manuella kontroller räcker.
 
 ## Filer
@@ -37,7 +37,8 @@ Lokalt röktest utan riktiga tjänster: sätt `database_id` tillfälligt till et
 ## Domänmodell
 - `users`: `approved` = har tillgång (1) / inte (0). `pending` = 1 tillsammans med `approved` = 0 betyder "väntar på godkännande", båda 0 betyder "nekad/avstängd". `password_hash` = `pbkdf2$<iterationer>$<salt>$<hash>`, NULL = inget lösenord satt ännu (tillagd av admin, eller nollställt). Konto skapas på `/registrera`: adresser i `ADMIN_EMAILS` och adresser admin lagt till kommer in direkt, alla andra hamnar i kön. Är `REGISTRATION_CODE` satt krävs den också, som filter före kön. `name === email` betyder "har inte satt namn ännu" → middleware skickar till `/namn` (gäller bara konton som kommit in via mejlkoden).
 - `videos.status`: `uploading` → `processing` → `ready` | `error`. Uppdateras när någon öppnar klippsidan (pollar Stream). `stream_uid` är nyckeln mot Stream. `customer_code` (för spelar-URL:en) läses ur Stream-svarets `preview`-fält och sparas per video – ingen konfig behövs.
-- `comments.timestamp_s`: sekunder i klippet, null = ingen tidpunkt. Visas som `m:ss`.
+- `comments.timestamp_s`: sekunder i klippet, null = ingen tidpunkt. Visas som `m:ss`. På klippsidan väljs den med ett reglage 0–`videos.duration_s` och skickas som rena sekunder (`parseTimestamp` klarar både `102` och `1:42`). Tidpunkterna i listan är knappar som spolar spelaren dit och pausar via Streams spelar-SDK (`embed.cloudflarestream.com/embed/sdk.latest.js`), med iframe-omladdning och `startTime` som reserv om SDK:n inte laddas.
+- `whistles`: "visselpipa" = håller med, en per `(comment_id, user_id)`. Samma knapp blåser och tar tillbaka. Raderas en kommentar eller ett klipp ska pipor raderas i samma batch.
 - `login_codes`: hashad kod, 10 min, max 5 försök, en aktiv per e-post.
 - Sessionen är en signerad JWT utan serverstate: `approved`/`pending` läses ur databasen vid varje anrop (avstängning slår igenom direkt), men ett nollställt lösenord loggar **inte** ut redan inloggade enheter.
 

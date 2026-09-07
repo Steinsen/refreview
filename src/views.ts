@@ -21,6 +21,8 @@ type Comment = {
   created_at: string
   author: string
   user_id: number
+  whistles: number
+  my_whistle: number
 }
 
 const CSS = `
@@ -70,8 +72,18 @@ label { display: block; font-weight: 600; font-size: .92rem; margin: 14px 0 5px;
 .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .comments { list-style: none; margin: 0; padding: 0; }
 .comments li { padding: 14px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 64px 1fr; gap: 14px; }
-.comments .ts { font-weight: 700; color: var(--sb-blue); font-variant-numeric: tabular-nums; background: var(--panel); border-radius: 4px; text-align: center; padding: 2px 0; align-self: start; }
+.comments .ts { font-weight: 700; color: var(--sb-blue); font-variant-numeric: tabular-nums; background: var(--panel); border-radius: 4px; text-align: center; padding: 2px 0; align-self: start; font-size: 1rem; font-family: inherit; border: 0; width: 100%; display: block; }
 .comments .ts.none { color: var(--muted); background: transparent; }
+button.ts { cursor: pointer; border: 1.5px solid transparent; min-height: 44px; }
+button.ts:hover { background: var(--sb-yellow); color: var(--sb-yellow-ink); }
+button.ts::after { content: '▸'; display: block; font-size: .7rem; line-height: 1; opacity: .6; }
+.pipa { display: inline-flex; align-items: center; gap: 8px; background: transparent; border: 1.5px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 16px; font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; min-height: 44px; margin-top: 10px; }
+.pipa:hover { border-color: var(--sb-blue); color: var(--sb-blue); }
+.pipa.given { background: var(--sb-yellow); border-color: var(--sb-yellow); color: var(--sb-yellow-ink); }
+.pipa .antal { font-variant-numeric: tabular-nums; }
+.tsval { font-weight: 700; font-size: 1.25rem; color: var(--sb-blue); font-variant-numeric: tabular-nums; }
+.tsval.none { color: var(--muted); font-weight: 600; }
+input[type=range] { width: 100%; accent-color: var(--sb-blue); height: 44px; }
 .comments .body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .comments .who { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .empty { color: var(--muted); padding: 24px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -323,14 +335,23 @@ export function newVideoPage(user: User, maxSeconds: number) {
 </script>`)
 }
 
+/** Visselpipa: munstycke + rund kropp + hål. Ärver färg från knappen. */
+const VISSELPIPA = html`<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" style="flex:none">
+  <rect x="1.5" y="8" width="11" height="7" rx="2.2" fill="currentColor"></rect>
+  <circle cx="15" cy="12.5" r="6.5" fill="currentColor"></circle>
+  <circle cx="15" cy="12.5" r="2.1" fill="currentColor" opacity=".35"></circle>
+</svg>`
+
 export function videoPage(user: User, video: Video, comments: Comment[], playerUrl: string | null, error?: string) {
+  // Tidpunkter går att klicka på först när spelaren finns och vi vet hur lång videon är
+  const kanValjaTid = !!playerUrl && !!video.duration_s
   return layout(video.title, user, html`
 <p class="meta"><a href="/">← Alla klipp</a></p>
 <h1>${video.title}</h1>
 <p class="meta">Upplagt av ${video.author} · ${fmtDate(video.created_at)}</p>
 ${playerUrl
-  ? html`<div class="player" style="margin:18px 0">
-  <iframe src="${playerUrl}" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" title="${video.title}"></iframe>
+  ? html`<div class="player" id="spelare" style="margin:18px 0">
+  <iframe id="ram" src="${playerUrl}" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="${video.title}"></iframe>
 </div>`
   : video.status === 'error'
     ? html`<div class="processing" style="margin:18px 0">Videon kunde inte bearbetas. Filen kan vara skadad eller för lång – testa att ladda upp den igen.</div>`
@@ -338,39 +359,107 @@ ${playerUrl
 <script>setTimeout(function(){location.reload()}, 8000)</script>`}
 ${video.description ? html`<p style="white-space:pre-wrap">${video.description}</p>` : ''}
 
-<h2>Kommentarer</h2>
+<h2 id="kommentarer">Kommentarer</h2>
 ${comments.length === 0
   ? html`<div class="empty">Inga kommentarer ännu.</div>`
   : html`<ul class="comments">${comments.map(
-      (k) => html`<li>
-        <div class="ts ${k.timestamp_s == null ? 'none' : ''}">${k.timestamp_s == null ? '—' : fmtTs(k.timestamp_s)}</div>
+      (k) => html`<li id="kommentar-${k.id}">
+        ${k.timestamp_s != null && kanValjaTid
+          ? html`<button type="button" class="ts" data-ts="${k.timestamp_s}" title="Hoppa till ${fmtTs(k.timestamp_s)} i klippet">${fmtTs(k.timestamp_s)}</button>`
+          : html`<div class="ts ${k.timestamp_s == null ? 'none' : ''}">${k.timestamp_s == null ? '—' : fmtTs(k.timestamp_s)}</div>`}
         <div>
           <div class="who"><strong>${k.author}</strong><span class="meta">${fmtDate(k.created_at)}
             ${k.user_id === user.id || user.is_admin
               ? html` <form method="post" action="/kommentar/${k.id}/radera" style="display:inline"><button class="btn danger" type="submit" onclick="return confirm('Radera kommentaren?')">Radera</button></form>`
               : ''}</span></div>
           <div class="body">${k.body}</div>
+          <form method="post" action="/kommentar/${k.id}/visselpipa">
+            <button class="pipa ${k.my_whistle ? 'given' : ''}" type="submit"
+              aria-pressed="${k.my_whistle ? 'true' : 'false'}"
+              title="${k.my_whistle ? 'Du har blåst i pipan – klicka för att ta tillbaka' : 'Blås i pipan om du håller med'}">
+              ${VISSELPIPA}<span class="antal">${k.whistles}</span>
+            </button>
+          </form>
         </div>
       </li>`,
     )}</ul>`}
 
 ${error ? html`<div class="notice" style="margin-top:20px">${error}</div>` : ''}
-<form method="post" action="/klipp/${video.id}/kommentar" style="margin-top:24px">
-  <div class="row">
-    <div style="flex:0 0 120px">
-      <label for="ts">Tidpunkt</label>
-      <input type="text" id="ts" name="ts" placeholder="1:42" pattern="^\\d{1,2}(:\\d{2}){1,2}$" inputmode="numeric">
-    </div>
-    <div class="grow">
-      <label for="body">Kommentar</label>
-      <textarea id="body" name="body" required maxlength="4000" style="min-height:76px"></textarea>
-    </div>
+<form method="post" action="/klipp/${video.id}/kommentar" style="margin-top:24px" id="kform" data-langd="${video.duration_s ?? 0}">
+  ${kanValjaTid
+    ? html`<label for="tsRange">Tidpunkt i klippet</label>
+  <div class="row" style="gap:16px">
+    <div class="tsval none" id="tsText" aria-live="polite">Ingen tidpunkt</div>
+    <div class="grow"><input type="range" id="tsRange" min="0" max="${video.duration_s}" step="1" value="0" aria-label="Välj tidpunkt i klippet"></div>
   </div>
-  <p class="hint">Tidpunkt är valfri – skriv t.ex. 1:42 för att peka på ett läge i klippet.</p>
+  <div class="row" style="gap:8px;margin-top:4px">
+    <button type="button" class="btn quiet" id="tsNu">Använd spelarens tid</button>
+    <button type="button" class="btn quiet" id="tsRensa">Ingen tidpunkt</button>
+  </div>
+  <input type="hidden" name="ts" id="ts" value="">
+  <p class="hint">Dra i reglaget eller pausa i spelaren och tryck "Använd spelarens tid". Klippet är ${fmtTs(video.duration_s!)} långt.</p>`
+    : html`<label for="ts">Tidpunkt</label>
+  <input type="text" id="ts" name="ts" placeholder="1:42" pattern="^\\d{1,2}(:\\d{2}){1,2}$" inputmode="numeric" style="max-width:120px">
+  <p class="hint">Tidpunkt är valfri – skriv t.ex. 1:42 för att peka på ett läge i klippet.</p>`}
+  <label for="body">Kommentar</label>
+  <textarea id="body" name="body" required maxlength="4000" style="min-height:76px"></textarea>
   <p style="margin-top:14px"><button class="btn" type="submit">Kommentera</button></p>
 </form>
 ${user.is_admin
   ? html`<p style="margin-top:40px"><form method="post" action="/klipp/${video.id}/radera"><button class="btn danger" type="submit" onclick="return confirm('Radera klippet och alla kommentarer?')">Radera klippet</button></form></p>`
+  : ''}
+${playerUrl
+  ? html`<script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
+<script>
+(function () {
+  var ram = document.getElementById('ram');
+  var spelare = null;
+  try { if (ram && window.Stream) spelare = Stream(ram); } catch (e) {}
+
+  function fmt(s) {
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sek = Math.floor(s % 60);
+    var mm = h ? String(m).padStart(2, '0') : String(m);
+    return (h ? h + ':' : '') + mm + ':' + String(sek).padStart(2, '0');
+  }
+
+  // Klicka på en tidpunkt: hoppa dit och pausa
+  function hoppa(t) {
+    if (spelare) {
+      spelare.currentTime = t;
+      spelare.pause();
+    } else if (ram) {
+      // Utan spelar-SDK: ladda om iframen med starttiden i adressen
+      var url = ram.src.split('#')[0].replace(/([?&])startTime=[^&]*/, '$1');
+      ram.src = url + (url.indexOf('?') === -1 ? '?' : '&') + 'startTime=' + t + 's';
+    }
+    var ruta = document.getElementById('spelare');
+    if (ruta) ruta.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('button.ts[data-ts]'), function (el) {
+    el.addEventListener('click', function () { hoppa(Number(el.getAttribute('data-ts'))); });
+  });
+
+  // Välj tidpunkt till en ny kommentar
+  var range = document.getElementById('tsRange'), dolt = document.getElementById('ts');
+  var text = document.getElementById('tsText'), nu = document.getElementById('tsNu'), rensa = document.getElementById('tsRensa');
+  if (range && dolt && text) {
+    var langd = Number(document.getElementById('kform').getAttribute('data-langd')) || 0;
+    function satt(t, aktiv) {
+      t = Math.max(0, Math.min(langd, Math.round(t)));
+      range.value = t;
+      dolt.value = aktiv ? t : '';
+      text.textContent = aktiv ? fmt(t) : 'Ingen tidpunkt';
+      text.className = aktiv ? 'tsval' : 'tsval none';
+    }
+    range.addEventListener('input', function () { satt(Number(range.value), true); });
+    if (rensa) rensa.addEventListener('click', function () { satt(0, false); });
+    if (nu) nu.addEventListener('click', function () {
+      if (!spelare) return satt(Number(range.value), true);
+      Promise.resolve(spelare.currentTime).then(function (t) { satt(Number(t) || 0, true); });
+    });
+  }
+})();
+</script>`
   : ''}`)
 }
 
