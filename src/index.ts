@@ -34,7 +34,7 @@ app.use(
       frameSrc: ['https://*.cloudflarestream.com'],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ['https://fonts.gstatic.com'],
-      scriptSrc: ["'unsafe-inline'", 'https://cdn.jsdelivr.net'], // tus-klient + små inline-skript
+      scriptSrc: ["'unsafe-inline'", 'https://cdn.jsdelivr.net', 'https://embed.cloudflarestream.com'], // tus-klient, Stream-spelarens SDK + små inline-skript
       connectSrc: ["'self'", 'https://*.cloudflarestream.com', 'https://upload.cloudflarestream.com'],
       formAction: ["'self'"],
       imgSrc: ["'self'", 'data:'],
@@ -274,10 +274,12 @@ app.get('/klipp/:id', requireApproved, async (c) => {
     }
   }
   const { results: comments } = await c.env.DB.prepare(
-    `SELECT k.id, k.body, k.timestamp_s, k.created_at, k.user_id, u.name AS author
+    `SELECT k.id, k.body, k.timestamp_s, k.created_at, k.user_id, u.name AS author,
+            (SELECT COUNT(*) FROM whistles w WHERE w.comment_id = k.id) AS whistles,
+            EXISTS(SELECT 1 FROM whistles w WHERE w.comment_id = k.id AND w.user_id = ?) AS my_whistle
      FROM comments k JOIN users u ON u.id = k.user_id WHERE k.video_id = ? ORDER BY k.created_at ASC`,
   )
-    .bind(id)
+    .bind(c.get('user')!.id, id)
     .all()
   return c.html(videoPage(c.get('user')!, video as any, comments as any, player))
 })
@@ -295,6 +297,21 @@ app.post('/klipp/:id/kommentar', requireApproved, async (c) => {
   return c.redirect(`/klipp/${id}#kommentarer`)
 })
 
+/** Visselpipa av/på – samma knapp tar tillbaka den. */
+app.post('/kommentar/:id/visselpipa', requireApproved, async (c) => {
+  const user = c.get('user')!
+  const id = Number(c.req.param('id'))
+  const k = await c.env.DB.prepare('SELECT video_id FROM comments WHERE id = ?').bind(id).first<{ video_id: number }>()
+  if (!k) return c.notFound()
+  const min = await c.env.DB.prepare('SELECT 1 AS x FROM whistles WHERE comment_id = ? AND user_id = ?').bind(id, user.id).first()
+  await c.env.DB.prepare(
+    min ? 'DELETE FROM whistles WHERE comment_id = ? AND user_id = ?' : 'INSERT INTO whistles (comment_id, user_id) VALUES (?, ?)',
+  )
+    .bind(id, user.id)
+    .run()
+  return c.redirect(`/klipp/${k.video_id}#kommentar-${id}`)
+})
+
 app.post('/kommentar/:id/radera', requireApproved, async (c) => {
   const user = c.get('user')!
   const id = Number(c.req.param('id'))
@@ -303,7 +320,10 @@ app.post('/kommentar/:id/radera', requireApproved, async (c) => {
     .first<{ video_id: number; user_id: number }>()
   if (!k) return c.notFound()
   if (k.user_id !== user.id && !user.is_admin) return c.text('Inte din kommentar', 403)
-  await c.env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id).run()
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM whistles WHERE comment_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id),
+  ])
   return c.redirect(`/klipp/${k.video_id}`)
 })
 
@@ -312,6 +332,7 @@ app.post('/klipp/:id/radera', requireAdmin, async (c) => {
   const v = await c.env.DB.prepare('SELECT stream_uid FROM videos WHERE id = ?').bind(id).first<{ stream_uid: string }>()
   if (v) await deleteVideo(c.env, v.stream_uid).catch(console.error)
   await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM whistles WHERE comment_id IN (SELECT id FROM comments WHERE video_id = ?)').bind(id),
     c.env.DB.prepare('DELETE FROM comments WHERE video_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM videos WHERE id = ?').bind(id),
   ])

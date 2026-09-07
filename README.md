@@ -1,6 +1,6 @@
 # RefReview
 
-Stängd app för basketdomare: ladda upp ett klipp direkt från mobilen eller datorn, skriv vad du vill att gruppen tittar på, och diskutera i kommentarer (gärna med tidpunkt, t.ex. `1:42`). Domarna skapar konto själva med e-post och lösenord – inget mejlutskick behövs. Nya konton hamnar i en kö och kommer in först när admin godkänner dem; en valfri **registreringskod** kan sättas som filter före kön. Engångskod på mejl finns kvar som alternativ när Resend är uppsatt.
+Stängd app för basketdomare: ladda upp ett klipp direkt från mobilen eller datorn, skriv vad du vill att gruppen tittar på, och diskutera i kommentarer med tidpunkt – klicka på tidpunkten så hoppar spelaren dit och pausar. Håller du med om en kommentar blåser du i visselpipan på den. Domarna skapar konto själva med e-post och lösenord – inget mejlutskick behövs. Nya konton hamnar i en kö och kommer in först när admin godkänner dem; en valfri **registreringskod** kan sättas som filter före kön. Engångskod på mejl finns kvar som alternativ när Resend är uppsatt.
 
 Kör på Cloudflare Workers + D1 + Stream. Videofilerna går direkt från webbläsaren till Cloudflare Stream (återupptagbar uppladdning, upp till 5 GB), transkodas för alla enheter och spelas bara upp med en signerad länk som appen skapar för inloggade användare. Inget byggsteg, inget ramverk i webbläsaren.
 
@@ -69,6 +69,11 @@ npx wrangler d1 execute refreview --remote --command "UPDATE users SET password_
 ```
 
 Är Resend uppsatt finns även den gamla vägen in längst ned på inloggningssidan: skriv e-postadressen → sexsiffrig kod på mejlen (gäller 10 minuter, max 5 försök). Den fungerar bara för adresser som redan finns i användarlistan.
+
+## Kommentarer, tidpunkter och visselpipor
+Under klippet väljer du tidpunkt med ett reglage som går från början till slutet av videon, eller pausar i spelaren och trycker **Använd spelarens tid**. **Ingen tidpunkt** gör kommentaren allmän. Tidpunkten till vänster om varje kommentar går att klicka på: spelaren hoppar dit och pausar.
+
+**Visselpipan** under varje kommentar är ett "jag håller med" på domarspråk. Klicka en gång för att blåsa, en gång till för att ta tillbaka – en pipa per person och kommentar, och antalet syns på knappen.
 
 ## Hur domarna lägger upp klipp
 **Lägg upp klipp** → välj videofil (fungerar direkt från kamerarullen på mobilen) → rubrik och kommentar → **Lägg upp**. Uppladdningen visar förlopp och återupptas om uppkopplingen bryts. Efter uppladdning bearbetar Stream filen i någon minut; sidan uppdaterar sig själv tills klippet går att spela.
