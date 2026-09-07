@@ -14,6 +14,9 @@ type Video = {
   comment_count?: number
 }
 
+/** Visselpipan är avstängd tills vidare – sätt till true för att visa knappen igen. */
+export const VISSELPIPOR_PA = false
+
 type Comment = {
   id: number
   body: string
@@ -21,8 +24,8 @@ type Comment = {
   created_at: string
   author: string
   user_id: number
-  whistles: number
-  my_whistle: number
+  whistles?: number
+  my_whistle?: number
 }
 
 const CSS = `
@@ -373,13 +376,15 @@ ${comments.length === 0
               ? html` <form method="post" action="/kommentar/${k.id}/radera" style="display:inline"><button class="btn danger" type="submit" onclick="return confirm('Radera kommentaren?')">Radera</button></form>`
               : ''}</span></div>
           <div class="body">${k.body}</div>
-          <form method="post" action="/kommentar/${k.id}/visselpipa">
+          ${VISSELPIPOR_PA
+            ? html`<form method="post" action="/kommentar/${k.id}/visselpipa">
             <button class="pipa ${k.my_whistle ? 'given' : ''}" type="submit"
               aria-pressed="${k.my_whistle ? 'true' : 'false'}"
               title="${k.my_whistle ? 'Du har blåst i pipan – klicka för att ta tillbaka' : 'Blås i pipan om du håller med'}">
-              ${VISSELPIPA}<span class="antal">${k.whistles}</span>
+              ${VISSELPIPA}<span class="antal">${k.whistles ?? 0}</span>
             </button>
-          </form>
+          </form>`
+            : ''}
         </div>
       </li>`,
     )}</ul>`}
